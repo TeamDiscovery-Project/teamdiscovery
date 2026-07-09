@@ -175,7 +175,7 @@ export default function App() {
       // --- Step 6: Describe frames ---
       setPipelineStep("describe");
 
-      const frameBase64s = frames.map((f) => f.dataUrl);
+      const frameBase64s = frames.map((f) => f.dataUrl.split(",")[1]);
       const describeRes = await fetch(`${FUNCTIONS_URL}/describe-frames`, {
         method: "POST",
         headers: {
@@ -187,10 +187,20 @@ export default function App() {
 
       if (!describeRes.ok) {
         const err = await describeRes.json().catch(() => ({}));
-        throw new Error(err.error || "Frame description failed");
+        throw new Error(err.details || err.error || "Frame description failed");
       }
 
-      const { descriptions } = await describeRes.json();
+      const describeData = await describeRes.json();
+      // Diagnostic: function returned model list instead of descriptions
+      if (!describeData.descriptions && describeData.total_models !== undefined) {
+        const visionModels = describeData.vision_models || [];
+        throw new Error(
+          "MODEL LIST — Vision models: " +
+          JSON.stringify(visionModels.slice(0, 10)) +
+          " | Total: " + describeData.total_models
+        );
+      }
+      const descriptions = describeData.descriptions;
 
       // --- Step 7: Build video context ---
       const videoContext = [
