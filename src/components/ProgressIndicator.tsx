@@ -1,6 +1,7 @@
 import { Check, Loader2, Clock } from "lucide-react";
 
 export type PipelineStep =
+  | "compress"
   | "upload"
   | "frames"
   | "transcribe"
@@ -14,7 +15,8 @@ interface StepInfo {
 }
 
 const STEPS: Record<PipelineStep, StepInfo> = {
-  upload: { label: "Upload", description: "Receiving your video" },
+  compress: { label: "Compress", description: "Optimizing video for upload" },
+  upload: { label: "Upload", description: "Sending to the cloud" },
   frames: { label: "Extract Frames", description: "Pulling key moments from your video" },
   transcribe: { label: "Transcribe", description: "Turning speech into text" },
   describe: { label: "Describe Frames", description: "Understanding what's happening visually" },
@@ -23,6 +25,7 @@ const STEPS: Record<PipelineStep, StepInfo> = {
 };
 
 const STEP_ORDER: PipelineStep[] = [
+  "compress",
   "upload",
   "frames",
   "transcribe",

@@ -3,6 +3,8 @@ import { Toaster, toast } from "sonner";
 import { Sparkles, Video, RefreshCw } from "lucide-react";
 import { supabase } from "./lib/supabase";
 import { extractFrames } from "./utils/frameExtractor";
+import { compressVideo } from "./utils/videoCompressor";
+import { extractAudio } from "./utils/audioExtractor";
 import UploadZone from "./components/UploadZone";
 import ProgressIndicator, { type PipelineStep } from "./components/ProgressIndicator";
 import ResultsPanel from "./components/ResultsPanel";
@@ -84,28 +86,77 @@ export default function App() {
     setIsGenerating(true);
     setPipelineError(null);
     setPhase("processing");
-    setPipelineStep("upload");
+    setPipelineStep("compress");
     setResults([]);
 
     try {
-      // --- Step 1: Upload to Supabase Storage ---
-      const fileExt = videoFile.name.split(".").pop() || "mp4";
+      // --- File size check ---
+      const maxSize = 500 * 1024 * 1024; // 500MB
+      if (videoFile.size > maxSize) {
+        throw new Error(
+          `Video is too large (${(videoFile.size / (1024 * 1024)).toFixed(0)}MB). Keep it under 500MB.`
+        );
+      }
+
+      // --- Step 1: Compress video ---
+      setPipelineStep("compress");
+      const compressedFile = await compressVideo(videoFile);
+
+      // --- Step 2: Upload video to Supabase Storage ---
+      setPipelineStep("upload");
+      const fileExt = compressedFile.name.split(".").pop() || "mp4";
       const fileName = `${Date.now()}-${crypto.randomUUID()}.${fileExt}`;
 
       const { error: uploadError } = await supabase.storage
         .from("videos")
-        .upload(fileName, videoFile);
+        .upload(fileName, compressedFile);
 
       if (uploadError) {
         throw new Error(`Upload failed: ${uploadError.message}`);
       }
 
-      // --- Step 2: Create job record in DB ---
+      // --- Step 2b: Try to extract audio (skip gracefully if video is silent) ---
+      let transcript = "";
+
+      try {
+        const audioFile = await extractAudio(compressedFile);
+        const audioFileName = `${Date.now()}-${crypto.randomUUID()}-audio.webm`;
+
+        const { error: audioUploadError } = await supabase.storage
+          .from("videos")
+          .upload(audioFileName, audioFile);
+
+        if (!audioUploadError) {
+          // --- Transcribe audio (tiny audio file, well under Groq's 25MB limit) ---
+          setPipelineStep("transcribe");
+
+          const transcribeRes = await fetch(`${FUNCTIONS_URL}/transcribe`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${ANON_KEY}`,
+            },
+            body: JSON.stringify({ storagePath: audioFileName }),
+          });
+
+          if (transcribeRes.ok) {
+            const data = await transcribeRes.json();
+            transcript = data.transcript || "";
+          }
+        }
+      } catch {
+        // No audio track — totally fine, caption from visuals alone
+        transcript = "";
+      }
+
+      // --- Step 3: Create job record in DB ---
       const { data: jobData, error: jobError } = await supabase
         .from("jobs")
         .insert({
           storage_path: fileName,
+          filename: compressedFile.name,
           status: "uploading",
+          duration_seconds: videoDuration,
         })
         .select("id")
         .single();
@@ -117,30 +168,11 @@ export default function App() {
       const jid = jobData.id;
       setJobId(jid);
 
-      // --- Step 3: Extract frames in browser ---
+      // --- Step 4: Extract frames in browser ---
       setPipelineStep("frames");
       const frames = await extractFrames(videoFile);
 
-      // --- Step 4: Transcribe audio ---
-      setPipelineStep("transcribe");
-
-      const transcribeRes = await fetch(`${FUNCTIONS_URL}/transcribe`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${ANON_KEY}`,
-        },
-        body: JSON.stringify({ storagePath: fileName }),
-      });
-
-      if (!transcribeRes.ok) {
-        const err = await transcribeRes.json().catch(() => ({}));
-        throw new Error(err.error || "Audio transcription failed");
-      }
-
-      const { transcript } = await transcribeRes.json();
-
-      // --- Step 5: Describe frames ---
+      // --- Step 6: Describe frames ---
       setPipelineStep("describe");
 
       const frameBase64s = frames.map((f) => f.dataUrl);
@@ -160,7 +192,7 @@ export default function App() {
 
       const { descriptions } = await describeRes.json();
 
-      // --- Step 6: Build video context ---
+      // --- Step 7: Build video context ---
       const videoContext = [
         `# Transcript\n${transcript}`,
         `# Frame Descriptions`,
@@ -179,7 +211,7 @@ export default function App() {
         })
         .eq("id", jid);
 
-      // --- Step 7: Generate all captions ---
+      // --- Step 8: Generate all captions ---
       setPipelineStep("captions");
 
       const genRes = await fetch(`${FUNCTIONS_URL}/generate-all-captions`, {
@@ -198,7 +230,7 @@ export default function App() {
 
       const { captions } = await genRes.json();
 
-      // --- Step 8: Save captions to DB ---
+      // --- Step 9: Save captions to DB ---
       const captionInserts = Object.entries(captions).map(
         ([style, text]) => ({
           job_id: jid,
