@@ -1,0 +1,52 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,600;0,700;0,800;1,400&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-heading: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --color-primary: oklch(0.6559 0.2118 354.31);
+  --color-on-primary: oklch(1.0 0 0);
+  --color-secondary: oklch(0.5916 0.218 0.58);
+  --color-accent: oklch(0.5461 0.2152 262.88);
+  --color-background: oklch(0.2077 0.0398 265.75);
+  --color-foreground: oklch(1.0 0 0);
+  --color-muted: oklch(0.2375 0.0456 294.16);
+  --color-border: rgba(255,255,255,0.08);
+  --color-destructive: oklch(0.5771 0.2152 27.33);
+  --color-ring: oklch(0.6559 0.2118 354.31);
+
+  /* Style-specific accent colors for the four caption cards */
+  --color-style-formal: oklch(0.5461 0.2152 262.88);
+  --color-style-sarcastic: oklch(0.6559 0.2118 354.31);
+  --color-style-humorous-tech: oklch(0.5916 0.218 0.58);
+  --color-style-humorous-nontech: oklch(0.7051 0.1777 145.77);
+}
+
+/* Base styles */
+html {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+}
+
+/* Focus ring utility */
+*:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
