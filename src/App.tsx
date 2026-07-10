@@ -29,6 +29,26 @@ const STEP_ESTIMATES: Record<string, number> = {
   captions: 30,
 };
 
+// Client-side caption cleaning — strips reasoning prefixes that leak through
+function clientCleanCaption(raw: string): string {
+  if (!raw) return "";
+  let c = raw.trim();
+
+  // Strip emojis
+  c = c.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{200D}]/gu, "").trim();
+
+  // Strip surrounding quotes
+  c = c.replace(/^["']|["']$/g, "").trim();
+
+  // Strip known reasoning prefixes: "Possible ideas:", "Humor angle:", "Possible caption:", etc.
+  c = c.replace(/^(?:possible\s+(?:ideas|caption|option|response)|humor\s+angle|here.?s\s+(?:a|some|the)|here\s+are|nature.?s\s+blockbuster)\s*[:\-–—]\s*/i, "").trim();
+
+  // Strip "Caption:" / "Output:" / "Formal caption:" style prefixes
+  c = c.replace(/^(?:(?:humorous|formal|sarcastic|funny|witty|clever|tech|non-tech|casual|professional)\s+)?(?:caption|response|output|result)\s*[:\-–—]\s*/i, "").trim();
+
+  return c;
+}
+
 // Model name shown per pipeline step
 const STEP_MODELS: Record<string, string | null> = {
   compress: null,
@@ -61,17 +81,13 @@ export default function App() {
   const prevStepRef = useRef<PipelineStep>("upload");
   const stepElapsedRef = useRef(0);
 
-  // Keep ref in sync with stepElapsed so effects can read latest value
-  useEffect(() => {
-    stepElapsedRef.current = stepElapsed;
-  }, [stepElapsed]);
-
   // Reset timing when processing starts
   useEffect(() => {
     if (phase !== "processing") return;
     const now = Date.now();
     setStepStartTime(now);
     setStepElapsed(0);
+    stepElapsedRef.current = 0;
     setStepTimes({});
     setActiveModel(STEP_MODELS["compress"] || null);
     prevStepRef.current = "compress";
@@ -92,7 +108,11 @@ export default function App() {
   useEffect(() => {
     if (phase !== "processing") return;
     const interval = setInterval(() => {
-      setStepElapsed((prev) => prev + 1);
+      setStepElapsed((prev) => {
+        const next = prev + 1;
+        stepElapsedRef.current = next;
+        return next;
+      });
     }, 1000);
     return () => clearInterval(interval);
   }, [phase]);
@@ -111,6 +131,7 @@ export default function App() {
     // Start timing the new step
     setStepStartTime(Date.now());
     setStepElapsed(0);
+    stepElapsedRef.current = 0;
     setActiveModel(STEP_MODELS[pipelineStep] || null);
     prevStepRef.current = pipelineStep;
   }, [pipelineStep, phase]);
@@ -322,8 +343,12 @@ export default function App() {
 
       const { captions: initialCaptions } = await genRes.json();
 
-      // --- Quality check & retry for empty/bad captions ---
-      const captions = { ...(initialCaptions as CaptionResults) };
+      // --- Clean & quality check captions ---
+      const captions: CaptionResults = {} as CaptionResults;
+      for (const style of CAPTION_STYLES) {
+        captions[style.key] = clientCleanCaption(initialCaptions[style.key] || "");
+      }
+
       const stylesToRetry = CAPTION_STYLES.filter(
         (s) => !captions[s.key] || captions[s.key].trim().length < 15
       );
@@ -344,8 +369,9 @@ export default function App() {
 
               if (retryRes.ok) {
                 const { caption } = await retryRes.json();
-                if (caption && caption.trim().length >= 15) {
-                  captions[style.key] = caption;
+                const cleaned = clientCleanCaption(caption || "");
+                if (cleaned && cleaned.length >= 15) {
+                  captions[style.key] = cleaned;
                   break; // got a good one, stop retrying
                 }
               }
@@ -434,11 +460,12 @@ export default function App() {
         }
 
         const { caption } = await res.json();
+        const cleaned = clientCleanCaption(caption || "");
 
         setResults((prev) =>
           prev.map((r) =>
             r.style === style
-              ? { ...r, caption, loading: false }
+              ? { ...r, caption: cleaned, loading: false }
               : r
           )
         );
