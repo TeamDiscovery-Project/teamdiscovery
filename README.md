@@ -244,7 +244,7 @@ Failed captions trigger up to 3 retries with progressive backoff (0ms → 500ms 
 
 ## 📄 License
 
-MIT — Built with ❤️ for hackathons.
+MIT — Built with ❤️ for hackathon.
 
 ---
 
