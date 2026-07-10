@@ -1,5 +1,6 @@
 import { motion } from "framer-motion";
-import { Check, Loader2, AlertCircle, Clock } from "lucide-react";
+import { Check, Loader2, AlertCircle, Clock, Timer } from "lucide-react";
+import { calculateRemaining } from "../utils/timeEstimator";
 
 export type PipelineStep =
   | "upload"
@@ -43,7 +44,7 @@ function Diamond({
   children: React.ReactNode;
 }) {
   const baseClasses =
-    "relative w-11 h-11 flex items-center justify-center flex-shrink-0 transition-colors duration-500";
+    "relative w-9 h-9 sm:w-11 sm:h-11 flex items-center justify-center flex-shrink-0 transition-colors duration-500";
 
   const stateClasses =
     state === "done"
@@ -109,6 +110,7 @@ export default function ProgressIndicator({
   stepEstimates,
 }: ProgressIndicatorProps) {
   const currentIndex = STEPS.findIndex((s) => s.key === currentStep);
+  const totalRemaining = calculateRemaining(stepEstimates, currentStep);
 
   return (
     <div className="space-y-6">
@@ -128,7 +130,7 @@ export default function ProgressIndicator({
           return (
             <div
               key={step.key}
-              className="flex-1 flex flex-col items-center gap-2.5 min-w-0"
+              className="flex-1 flex flex-col items-center gap-1.5 min-w-0"
             >
               <div className="flex items-center w-full">
                 {/* Leading connector */}
@@ -166,8 +168,8 @@ export default function ProgressIndicator({
               {/* Label */}
               <span
                 className={`
-                  text-[10px] sm:text-xs text-center leading-tight px-1
-                  transition-colors duration-300
+                  text-[9px] sm:text-[11px] text-center leading-tight px-0.5
+                  whitespace-nowrap transition-colors duration-300
                   ${isActive ? "text-secondary font-semibold" : "text-foreground/40"}
                 `}
               >
@@ -200,10 +202,11 @@ export default function ProgressIndicator({
             Elapsed: {formatTime(stepElapsed)}
           </span>
 
-          {/* ETA */}
-          {stepEstimates[currentStep] && (
-            <span className="text-foreground/20">
-              ~{formatTime(stepEstimates[currentStep])} estimated
+          {/* Total remaining */}
+          {totalRemaining > 0 && (
+            <span className="flex items-center gap-1.5 text-secondary font-medium">
+              <Timer className="w-3.5 h-3.5" />
+              ~{formatTime(totalRemaining)} estimated
             </span>
           )}
         </motion.div>

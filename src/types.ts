@@ -89,6 +89,12 @@ export const CAPTION_STYLE_LABELS: Record<CaptionStyle, string> = {
   humorous_non_tech: "Humorous (Non-Tech)",
 };
 
+/** Timing instrumentation for a single pipeline step */
+export interface StepTiming {
+  step: string;
+  ms: number;
+}
+
 export const CAPTION_STYLE_COLORS: Record<CaptionStyle, string> = {
   formal: "var(--color-style-formal)",
   sarcastic: "var(--color-style-sarcastic)",

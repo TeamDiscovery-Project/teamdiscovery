@@ -6,7 +6,8 @@
 export async function extractAudio(videoFile: File): Promise<File> {
   const video = document.createElement("video");
   video.preload = "metadata";
-  video.muted = false;
+  video.muted = false;    // required so captureStream() includes audio tracks
+  video.volume = 0;       // silence speaker output during processing
 
   const url = URL.createObjectURL(videoFile);
   video.src = url;

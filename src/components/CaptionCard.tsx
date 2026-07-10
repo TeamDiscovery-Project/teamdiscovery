@@ -1,12 +1,13 @@
 import React, { useState, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Copy, Check, Loader2, AlertCircle, ChevronDown } from "lucide-react";
+import { Copy, Check, Loader2, AlertCircle, ChevronDown, RefreshCw } from "lucide-react";
 import { GlitchText } from "./GlitchText";
 import { CaptionResult, CaptionStyle } from "../types";
 import { STYLE_CONFIG } from "../utils/styleConfig";
 
 interface CaptionCardProps {
   result: CaptionResult;
+  onRegenerate?: (style: CaptionStyle) => void;
 }
 
 const springTransition = { type: "spring" as const, stiffness: 500, damping: 30 };
@@ -20,7 +21,7 @@ const copyButtonVariants = {
   },
 };
 
-export const CaptionCard: React.FC<CaptionCardProps> = ({ result }) => {
+export const CaptionCard: React.FC<CaptionCardProps> = ({ result, onRegenerate }) => {
   const { style, caption, loading, error, retrying } = result;
   const styleCfg = STYLE_CONFIG[style];
   const [copied, setCopied] = useState(false);
@@ -93,6 +94,15 @@ export const CaptionCard: React.FC<CaptionCardProps> = ({ result }) => {
           bg-style-sarcastic/10 border border-style-sarcastic/30 text-style-sarcastic/80 text-xs">
           <AlertCircle className="w-3 h-3" />
           Error
+        </div>
+      );
+    }
+    if (!caption && !loading && !retrying) {
+      return (
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full
+          bg-style-sarcastic/5 border border-style-sarcastic/20 text-style-sarcastic/60 text-xs">
+          <AlertCircle className="w-3 h-3" />
+          Failed
         </div>
       );
     }
@@ -191,13 +201,31 @@ export const CaptionCard: React.FC<CaptionCardProps> = ({ result }) => {
                 transition={{ duration: 1.5, repeat: Infinity, ease: "linear", delay: 0.4 }}
               />
             </div>
+          ) : !caption && !loading ? (
+            <div className="flex flex-col items-center gap-3 py-4">
+              <p className="text-sm text-foreground/30 italic text-center">
+                Couldn&apos;t generate this caption — the model didn&apos;t return a valid result.
+              </p>
+              {onRegenerate && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onRegenerate(style); }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg
+                    text-xs font-medium text-secondary/70 border border-secondary/20
+                    hover:bg-secondary/10 hover:text-secondary hover:border-secondary/40
+                    active:scale-[0.97] transition-all duration-150 ease-out
+                    focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-secondary"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  Tap to retry
+                </button>
+              )}
+            </div>
           ) : (
             <p
               className={`text-sm font-mono leading-relaxed text-foreground/90
-                ${!expanded ? "line-clamp-3" : ""}
-                ${!caption && !loading ? "text-foreground/30 italic" : ""}`}
+                ${!expanded ? "line-clamp-3" : ""}`}
             >
-              {caption || "Awaiting generation…"}
+              {caption}
             </p>
           )}
         </div>

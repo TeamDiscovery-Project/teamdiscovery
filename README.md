@@ -29,6 +29,7 @@ Writing captions is time-consuming. Writing captions in **multiple tones** for d
 | 🎬 **Video Processing Pipeline** | In-browser compression, frame extraction, audio extraction — all automated |
 | 🧠 **Multi-Model AI** | Vision models describe frames, Groq transcribes audio, DeepSeek-V4-Pro generates captions |
 | 🎨 **4 Caption Styles** | Formal · Sarcastic · Humorous Tech · Humorous Non-Tech |
+| ⏱️ **Pipeline Timing** | Console-based step timing breakdown shows exactly how long each pipeline stage takes |
 | ✅ **Quality Validation** | Built-in validator catches AI reasoning dumps, instruction echoes, and incomplete output — with 3-attempt auto-retry |
 | 🔄 **Per-Style Regeneration** | Regenerate any individual caption without re-running the whole pipeline |
 | 🖥️ **Cyberpunk UI** | Particle-canvas background, neon borders, glitch-text effects, 3D tilt cards, and animated pipeline progress |
@@ -43,26 +44,26 @@ Writing captions is time-consuming. Writing captions in **multiple tones** for d
 ┌────────────────────────────────────────────────────────────────────┐
 │                        BROWSER (React App)                         │
 │                                                                    │
-│  Upload → Compress → Extract Frames → Extract Audio                │
+│  Upload → Compress → Extract Frames → Extract Audio               │
 │     │          │              │               │                    │
 │     ▼          ▼              ▼               ▼                    │
 │  [Supabase Storage]  [Canvas API]      [MediaRecorder]             │
 │     │                    │               │                         │
 │     ▼                    ▼               ▼                         │
 │  ┌──────────────────────────────────────────────┐                  │
-│  │           SUPABASE EDGE FUNCTIONS            │                  │
-│  │                                              │                  │
-│  │  /transcribe ──── Groq Whisper               │                  │
-│  │  /describe-frames ─ Fireworks Vision Models  │                  │
-│  │  /generate-caption ─ DeepSeek-V4-Pro         │                  │
-│  │  /generate-all-captions ─ Batch Generation   │                  │
+│  │           SUPABASE EDGE FUNCTIONS             │                  │
+│  │                                               │                  │
+│  │  /transcribe ──── Groq Whisper                │                  │
+│  │  /describe-frames ─ Fireworks Vision Models   │                  │
+│  │  /generate-caption ─ DeepSeek-V4-Pro          │                  │
+│  │  /generate-all-captions ─ Batch Generation    │                  │
 │  └──────────────────────────────────────────────┘                  │
 │     │                                                              │
 │     ▼                                                              │
 │  ┌─────────────────────┐     ┌──────────────────────┐              │
-│  │    Supabase DB      │     │  Caption Validator   │              │
-│  │  jobs + captions    │     │  Reasoning filter +  │              │
-│  │  tables             │     │  3-attempt retry loop│              │
+│  │    Supabase DB       │     │  Caption Validator    │              │
+│  │  jobs + captions    │     │  Reasoning filter +   │              │
+│  │  tables             │     │  3-attempt retry loop │              │
 │  └─────────────────────┘     └──────────────────────┘              │
 └────────────────────────────────────────────────────────────────────┘
 ```
@@ -126,6 +127,15 @@ Writing captions is time-consuming. Writing captions in **multiple tones** for d
   - `generate-caption`
   - `generate-all-captions`
 
+### Environment Variables
+
+Copy `.env.example` to `.env` and configure:
+
+| Variable | Description |
+|---|---|
+| `VITE_SUPABASE_URL` | Your Supabase project URL |
+| `VITE_SUPABASE_ANON_KEY` | Supabase publishable (anon) key |
+
 ### Local Development
 
 ```bash
@@ -169,6 +179,7 @@ TeamDiscovery/
 │       ├── captionValidator.ts    # AI output validation & cleaning
 │       ├── frameExtractor.ts      # Canvas-based frame capture
 │       ├── styleConfig.ts         # Per-style colors, emojis, gradients
+│       ├── timeEstimator.ts       # Per-step time estimates for pipeline progress
 │       └── videoCompressor.ts     # MediaRecorder-based re-encoding
 ├── public/
 │   └── nativelyai.svg            # App favicon

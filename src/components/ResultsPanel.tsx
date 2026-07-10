@@ -3,7 +3,7 @@ import { LayoutGrid, AlignJustify, Copy, Check, Download, FileText, FileJson } f
 import { toast } from "sonner";
 import { motion } from "framer-motion";
 import { CaptionCard } from "./CaptionCard";
-import { CaptionStyle, CaptionResult } from "../types";
+import { CaptionStyle, CaptionResult, StepTiming } from "../types";
 import { STYLE_CONFIG } from "../utils/styleConfig";
 
 type ViewMode = "grid" | "stack";
@@ -13,6 +13,7 @@ interface ResultsPanelProps {
   onRegenerate: (style: CaptionStyle) => void;
   regeneratingStyles: Set<CaptionStyle>;
   onEditCaption?: (style: CaptionStyle, newCaption: string) => void;
+  timings?: StepTiming[];
 }
 
 function formatCaptionsForCopy(results: CaptionResult[]): string {
@@ -49,6 +50,7 @@ export default function ResultsPanel({
   onRegenerate,
   regeneratingStyles,
   onEditCaption,
+  timings,
 }: ResultsPanelProps) {
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [copiedAll, setCopiedAll] = useState(false);
@@ -253,6 +255,34 @@ export default function ResultsPanel({
         </div>
       </div>
 
+      {/* Timing breakdown */}
+      {timings && timings.length > 0 && (
+        <div className="flex items-center gap-2 text-xs text-foreground/50 font-mono flex-wrap">
+          <span className="text-foreground/40">⏱</span>
+          <span>
+            Processing:{" "}
+            {((timings.find((t) => t.step === "total")?.ms ?? 0) / 1000).toFixed(1)}s
+          </span>
+          <span className="text-foreground/20">·</span>
+          {timings
+            .filter((t) => t.step !== "total")
+            .map((t, i) => (
+              <span key={t.step} className="inline-flex items-center gap-1">
+                {i > 0 && <span className="text-foreground/20">·</span>}
+                <span className="text-foreground/40">{t.step}:</span>
+                <span className={t.ms > 5000 ? "text-warning" : ""}>
+                  {(t.ms / 1000).toFixed(1)}s
+                  {t.ms > 5000 && (
+                    <span className="ml-0.5 text-[10px]" title="This step took longer than 5 seconds">
+                      ⚠️
+                    </span>
+                  )}
+                </span>
+              </span>
+            ))}
+        </div>
+      )}
+
       {/* Neon divider */}
       <div className="neon-divider" />
 
@@ -272,6 +302,7 @@ export default function ResultsPanel({
             >
               <CaptionCard
                 result={result}
+                onRegenerate={onRegenerate}
               />
             </motion.div>
           ))}
@@ -291,6 +322,7 @@ export default function ResultsPanel({
             >
               <CaptionCard
                 result={result}
+                onRegenerate={onRegenerate}
               />
             </motion.div>
           ))}

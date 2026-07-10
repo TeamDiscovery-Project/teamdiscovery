@@ -16,6 +16,7 @@ export async function compressVideo(file: File): Promise<File> {
 
   const video = document.createElement("video");
   video.preload = "metadata";
+  video.volume = 0; // silence speaker output during compression
 
   const url = URL.createObjectURL(file);
   video.src = url;

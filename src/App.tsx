@@ -11,27 +11,16 @@ import NeonFrame from "./components/NeonFrame";
 import UploadZone from "./components/UploadZone";
 import ProgressIndicator, { type PipelineStep } from "./components/ProgressIndicator";
 import ResultsPanel from "./components/ResultsPanel";
-import type { CaptionStyle, CaptionResult, CaptionResults } from "./types";
+import type { CaptionStyle, CaptionResult, CaptionResults, StepTiming } from "./types";
 import { CAPTION_STYLES, CAPTION_STYLE_LABELS } from "./types";
 import { validateCaption } from "./utils/captionValidator";
+import { calculateEstimates } from "./utils/timeEstimator";
 
-// Edge function base URL
-const FUNCTIONS_URL =
-  "https://nseofqhsninmfzqnvkvl.supabase.co/functions/v1";
+// Edge function base URL (derived from Supabase project URL)
+const FUNCTIONS_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`;
 
-// Anon key for edge function calls
-const ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5zZW9mcWhzbmlubWZ6cW52a3ZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU0MjYyNTIsImV4cCI6MjA4MTAwMjI1Mn0.ynRuG4hEmGCo_KfavnOxWRD72AfxxE1f04100i3ZvCY";
-
-// Step timing estimates (seconds) for status bar ETA
-const STEP_ESTIMATES: Record<string, number> = {
-  compress: 8,
-  upload: 12,
-  frames: 4,
-  transcribe: 6,
-  describe: 40,
-  captions: 30,
-};
+// Anon key for edge function calls (same key used by supabase client)
+const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 // Model name shown per pipeline step
 const STEP_MODELS: Record<string, string | null> = {
@@ -62,6 +51,14 @@ export default function App() {
   const [stepElapsed, setStepElapsed] = useState(0);
   const [stepTimes, setStepTimes] = useState<Record<string, number>>({});
   const [activeModel, setActiveModel] = useState<string | null>(null);
+  const [stepEstimates, setStepEstimates] = useState<Record<string, number>>({
+    compress: 8,
+    upload: 12,
+    frames: 4,
+    transcribe: 6,
+    describe: 40,
+    captions: 30,
+  });
   const prevStepRef = useRef<PipelineStep>("upload");
   const stepElapsedRef = useRef(0);
 
@@ -124,6 +121,7 @@ export default function App() {
   const [results, setResults] = useState<CaptionResult[]>([]);
   const [regeneratingStyles, setRegeneratingStyles] = useState<Set<CaptionStyle>>(new Set());
   const [isGenerating, setIsGenerating] = useState(false);
+  const [stepTimings, setStepTimings] = useState<StepTiming[]>([]);
 
   // Ref to track if component is still mounted
   const mountedRef = useRef(true);
@@ -150,12 +148,18 @@ export default function App() {
       if (!mountedRef.current) return;
       setVideoFile(file);
       setVideoPreviewUrl(url);
-      setVideoDuration(Math.round(video.duration));
+      const duration = Math.round(video.duration);
+      setVideoDuration(duration);
       setPhase("upload");
       setResults([]);
       setPipelineError(null);
       setJobId(null);
       setPipelineStep("upload");
+      setStepTimings([]);
+
+      // Calculate dynamic time estimates based on video file
+      const estimates = calculateEstimates(file.size, duration);
+      setStepEstimates(estimates.steps);
     };
 
     video.onerror = () => {
@@ -187,10 +191,13 @@ export default function App() {
 
       // --- Step 1: Compress video ---
       setPipelineStep("compress");
+      let stepStart = performance.now();
       const compressedFile = await compressVideo(videoFile);
+      const compressMs = Math.round(performance.now() - stepStart);
 
       // --- Step 2: Upload video to Supabase Storage ---
       setPipelineStep("upload");
+      stepStart = performance.now();
       const fileExt = compressedFile.name.split(".").pop() || "mp4";
       const fileName = `${Date.now()}-${crypto.randomUUID()}.${fileExt}`;
 
@@ -201,9 +208,12 @@ export default function App() {
       if (uploadError) {
         throw new Error(`Upload failed: ${uploadError.message}`);
       }
+      const uploadMs = Math.round(performance.now() - stepStart);
 
       // --- Step 2b: Try to extract audio (skip gracefully if video is silent) ---
       let transcript = "";
+      let transcribeMs = 0;
+      let transcribeError: string | null = null;
 
       try {
         const audioFile = await extractAudio(compressedFile);
@@ -216,6 +226,7 @@ export default function App() {
         if (!audioUploadError) {
           // --- Transcribe audio (tiny audio file, well under Groq's 25MB limit) ---
           setPipelineStep("transcribe");
+          const tStart = performance.now();
 
           const transcribeRes = await fetch(`${FUNCTIONS_URL}/transcribe`, {
             method: "POST",
@@ -226,14 +237,19 @@ export default function App() {
             body: JSON.stringify({ storagePath: audioFileName }),
           });
 
+          transcribeMs = Math.round(performance.now() - tStart);
+
           if (transcribeRes.ok) {
             const data = await transcribeRes.json();
             transcript = data.transcript || "";
+          } else {
+            transcribeError = `HTTP ${transcribeRes.status}`;
           }
         }
       } catch {
         // No audio track — totally fine, caption from visuals alone
         transcript = "";
+        transcribeError = "extraction skipped";
       }
 
       // --- Step 3: Create job record in DB ---
@@ -257,10 +273,13 @@ export default function App() {
 
       // --- Step 4: Extract frames in browser ---
       setPipelineStep("frames");
+      let frameStart = performance.now();
       const frames = await extractFrames(videoFile);
+      const framesMs = Math.round(performance.now() - frameStart);
 
       // --- Step 6: Describe frames ---
       setPipelineStep("describe");
+      frameStart = performance.now();
 
       const frameBase64s = frames.map((f) => f.dataUrl.split(",")[1]);
       const describeRes = await fetch(`${FUNCTIONS_URL}/describe-frames`, {
@@ -288,6 +307,7 @@ export default function App() {
         );
       }
       const descriptions = describeData.descriptions;
+      const describeMs = Math.round(performance.now() - frameStart);
 
       // --- Step 7: Build video context ---
       const videoContext = [
@@ -310,6 +330,7 @@ export default function App() {
 
       // --- Step 8: Generate all captions ---
       setPipelineStep("captions");
+      const captionsStart = performance.now();
 
       const genRes = await fetch(`${FUNCTIONS_URL}/generate-all-captions`, {
         method: "POST",
@@ -346,6 +367,7 @@ export default function App() {
         (s) => !captions[s.key]
       );
 
+      let retryCount = 0;
       if (stylesToRetry.length > 0) {
         // Retry each failed style individually with progressive backoff
         for (const style of stylesToRetry) {
@@ -374,6 +396,7 @@ export default function App() {
                 const retryValidation = validateCaption(caption || "");
                 if (retryValidation.valid && retryValidation.cleaned) {
                   captions[style.key] = retryValidation.cleaned;
+                  retryCount++;
                   break; // got a valid caption, stop retrying
                 }
               }
@@ -383,6 +406,34 @@ export default function App() {
           }
         }
       }
+
+      const captionsMs = Math.round(performance.now() - captionsStart);
+
+      // --- Build step timing log ---
+      const timings: StepTiming[] = [
+        { step: "compress", ms: compressMs },
+        { step: "upload", ms: uploadMs },
+      ];
+      if (transcribeMs > 0) {
+        timings.push({ step: "transcribe", ms: transcribeMs });
+      }
+      timings.push(
+        { step: "frames", ms: framesMs },
+        { step: "describe", ms: describeMs },
+        { step: "captions", ms: captionsMs },
+      );
+      const totalMs = timings.reduce((sum, t) => sum + t.ms, 0);
+      timings.push({ step: "total", ms: totalMs });
+
+      console.group("⏱ Pipeline Step Timings");
+      console.table(timings);
+      if (transcribeError) {
+        console.warn("Transcribe:", transcribeError);
+      }
+      console.log("Retries:", retryCount, "Failed styles after retries:", stylesToRetry.length - retryCount);
+      console.groupEnd();
+
+      setStepTimings(timings);
 
       // --- Step 9: Save captions to DB ---
       const captionInserts = Object.entries(captions).map(
@@ -412,6 +463,37 @@ export default function App() {
         return;
       }
 
+      // --- Final safety net: strip any leaked video context & cross-style duplicates ---
+      const ctxLeakPatterns = [
+        /^#\s+(Transcript|Frame\s+Descriptions?)/mi,
+        /\[\d+\.\d+s\]/,
+        /^Lyrics\s+(from|of)\b/im,
+        /transcript\s+is\s+(lyrics|from)\b/i,
+        /frame\s+descriptions?\s+show/i,
+      ];
+      for (const style of CAPTION_STYLES) {
+        const cap = captions[style.key];
+        if (cap && ctxLeakPatterns.some(p => p.test(cap))) {
+          console.error(`[SAFETY] Stripping leaked context from ${style.key}: "${cap.slice(0, 80)}..."`);
+          captions[style.key] = "";
+        }
+      }
+
+      // Cross-style duplication check — if any two styles have identical text, strip both
+      const styleKeys = CAPTION_STYLES.map(s => s.key);
+      for (let i = 0; i < styleKeys.length; i++) {
+        for (let j = i + 1; j < styleKeys.length; j++) {
+          const a = captions[styleKeys[i]];
+          const b = captions[styleKeys[j]];
+          if (a && b && a === b) {
+            console.error(`[SAFETY] Identical captions for ${styleKeys[i]} and ${styleKeys[j]}: "${a.slice(0, 80)}..."`);
+            // Strip both — something is wrong if two styles produce identical text
+            captions[styleKeys[i]] = "";
+            captions[styleKeys[j]] = "";
+          }
+        }
+      }
+
       // --- Done ---
       setPipelineStep("done");
 
@@ -419,7 +501,7 @@ export default function App() {
         style: s.key,
         caption: captions[s.key] || "",
         loading: false,
-        error: null,
+        error: captions[s.key] ? null : "Couldn't generate a valid caption for this style.",
       }));
 
       setResults(allResults);
@@ -490,13 +572,31 @@ export default function App() {
             const validation = validateCaption(caption || "");
 
             if (validation.valid && validation.cleaned) {
-              setResults((prev) =>
-                prev.map((r) =>
+              // Verify the caption doesn't duplicate another style's existing caption
+              let isDuplicate = false;
+              setResults((prev) => {
+                for (const r of prev) {
+                  if (r.style !== style && r.caption === validation.cleaned) {
+                    console.error(
+                      `[REGEN] Style ${style} returned identical caption to ${r.style}: "${validation.cleaned!.slice(0, 80)}..."`
+                    );
+                    isDuplicate = true;
+                    break;
+                  }
+                }
+                if (isDuplicate) return prev; // Don't update, retry instead
+                return prev.map((r) =>
                   r.style === style
                     ? { ...r, caption: validation.cleaned, retrying: false }
                     : r
-                )
-              );
+                );
+              });
+
+              if (isDuplicate) {
+                // Treat duplication as a validation failure — retry
+                continue;
+              }
+
               toast.success(`${CAPTION_STYLE_LABELS[style]} caption regenerated!`);
               succeeded = true;
               break;
@@ -564,6 +664,7 @@ export default function App() {
     setPipelineError(null);
     setJobId(null);
     setResults([]);
+    setStepTimings([]);
 
     if (previewUrlRef.current) {
       URL.revokeObjectURL(previewUrlRef.current);
@@ -750,7 +851,7 @@ export default function App() {
                 stepElapsed={stepElapsed}
                 stepTimes={stepTimes}
                 activeModel={activeModel}
-                stepEstimates={STEP_ESTIMATES}
+                stepEstimates={stepEstimates}
               />
             </motion.div>
           )}
@@ -784,6 +885,7 @@ export default function App() {
                 onRegenerate={handleRegenerate}
                 regeneratingStyles={regeneratingStyles}
                 onEditCaption={handleEditCaption}
+                timings={stepTimings}
               />
             </motion.div>
           )}
