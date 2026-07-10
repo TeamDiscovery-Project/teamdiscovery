@@ -43,26 +43,26 @@ Writing captions is time-consuming. Writing captions in **multiple tones** for d
 ┌────────────────────────────────────────────────────────────────────┐
 │                        BROWSER (React App)                         │
 │                                                                    │
-│  Upload → Compress → Extract Frames → Extract Audio               │
+│  Upload → Compress → Extract Frames → Extract Audio                │
 │     │          │              │               │                    │
 │     ▼          ▼              ▼               ▼                    │
 │  [Supabase Storage]  [Canvas API]      [MediaRecorder]             │
 │     │                    │               │                         │
 │     ▼                    ▼               ▼                         │
 │  ┌──────────────────────────────────────────────┐                  │
-│  │           SUPABASE EDGE FUNCTIONS             │                  │
-│  │                                               │                  │
-│  │  /transcribe ──── Groq Whisper                │                  │
-│  │  /describe-frames ─ Fireworks Vision Models   │                  │
-│  │  /generate-caption ─ DeepSeek-V4-Pro          │                  │
-│  │  /generate-all-captions ─ Batch Generation    │                  │
+│  │           SUPABASE EDGE FUNCTIONS            │                  │
+│  │                                              │                  │
+│  │  /transcribe ──── Groq Whisper               │                  │
+│  │  /describe-frames ─ Fireworks Vision Models  │                  │
+│  │  /generate-caption ─ DeepSeek-V4-Pro         │                  │
+│  │  /generate-all-captions ─ Batch Generation   │                  │
 │  └──────────────────────────────────────────────┘                  │
 │     │                                                              │
 │     ▼                                                              │
 │  ┌─────────────────────┐     ┌──────────────────────┐              │
-│  │    Supabase DB       │     │  Caption Validator    │              │
-│  │  jobs + captions    │     │  Reasoning filter +   │              │
-│  │  tables             │     │  3-attempt retry loop │              │
+│  │    Supabase DB      │     │  Caption Validator   │              │
+│  │  jobs + captions    │     │  Reasoning filter +  │              │
+│  │  tables             │     │  3-attempt retry loop│              │
 │  └─────────────────────┘     └──────────────────────┘              │
 └────────────────────────────────────────────────────────────────────┘
 ```
