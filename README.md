@@ -44,26 +44,26 @@ Writing captions is time-consuming. Writing captions in **multiple tones** for d
 ┌────────────────────────────────────────────────────────────────────┐
 │                        BROWSER (React App)                         │
 │                                                                    │
-│  Upload → Compress → Extract Frames → Extract Audio               │
+│  Upload → Compress → Extract Frames → Extract Audio                │
 │     │          │              │               │                    │
 │     ▼          ▼              ▼               ▼                    │
 │  [Supabase Storage]  [Canvas API]      [MediaRecorder]             │
 │     │                    │               │                         │
 │     ▼                    ▼               ▼                         │
 │  ┌──────────────────────────────────────────────┐                  │
-│  │           SUPABASE EDGE FUNCTIONS             │                  │
-│  │                                               │                  │
-│  │  /transcribe ──── Groq Whisper                │                  │
-│  │  /describe-frames ─ Fireworks Vision Models   │                  │
-│  │  /generate-caption ─ DeepSeek-V4-Pro          │                  │
-│  │  /generate-all-captions ─ Batch Generation    │                  │
+│  │           SUPABASE EDGE FUNCTIONS            │                  │
+│  │                                              │                  │
+│  │  /transcribe ──── Groq Whisper               │                  │
+│  │  /describe-frames ─ Fireworks Vision Models  │                  │
+│  │  /generate-caption ─ DeepSeek-V4-Pro         │                  │
+│  │  /generate-all-captions ─ Batch Generation   │                  │
 │  └──────────────────────────────────────────────┘                  │
 │     │                                                              │
 │     ▼                                                              │
 │  ┌─────────────────────┐     ┌──────────────────────┐              │
-│  │    Supabase DB       │     │  Caption Validator    │              │
-│  │  jobs + captions    │     │  Reasoning filter +   │              │
-│  │  tables             │     │  3-attempt retry loop │              │
+│  │    Supabase DB      │     │  Caption Validator   │              │
+│  │  jobs + captions    │     │  Reasoning filter +  │              │
+│  │  tables             │     │  3-attempt retry loop│              │
 │  └─────────────────────┘     └──────────────────────┘              │
 └────────────────────────────────────────────────────────────────────┘
 ```
@@ -181,8 +181,6 @@ TeamDiscovery/
 │       ├── styleConfig.ts         # Per-style colors, emojis, gradients
 │       ├── timeEstimator.ts       # Per-step time estimates for pipeline progress
 │       └── videoCompressor.ts     # MediaRecorder-based re-encoding
-├── public/
-│   └── nativelyai.svg            # App favicon
 ├── Dockerfile                    # Multi-stage: Node build → nginx serve
 ├── docker-compose.yml            # Single-service orchestration
 ├── nginx.conf                    # Gzip, caching, SPA fallback
@@ -235,10 +233,10 @@ Failed captions trigger up to 3 retries with progressive backoff (0ms → 500ms 
 | Name | Role |
 |---|---|
 | **Kartik Dave** | **Team Leader** |
-| Pruthvirajsinh Rathod | Developer |
-| Priyanshu Koshti | Developer |
-| Aakash Gupta | Developer |
-| Harshrajsinh Gohil | Developer |
+| Pruthvirajsinh Rathod | Member |
+| Priyanshu Koshti | Member |
+| Aakash Gupta | Member |
+| Harshrajsinh Gohil | Member |
 
 ---
 
