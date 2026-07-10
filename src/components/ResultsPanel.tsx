@@ -1,13 +1,103 @@
+import { useState, useRef, useEffect } from "react";
+import { LayoutGrid, AlignJustify, Copy, Check, Download, FileText, FileJson } from "lucide-react";
+import { toast } from "sonner";
+import { motion } from "framer-motion";
 import CaptionCard from "./CaptionCard";
 import { CaptionStyle, CaptionResult } from "../types";
+import { STYLE_CONFIG } from "../utils/styleConfig";
+
+type ViewMode = "grid" | "stack";
 
 interface ResultsPanelProps {
   results: CaptionResult[];
   onRegenerate: (style: CaptionStyle) => void;
   regeneratingStyles: Set<CaptionStyle>;
+  onEditCaption?: (style: CaptionStyle, newCaption: string) => void;
 }
 
-export default function ResultsPanel({ results, onRegenerate, regeneratingStyles }: ResultsPanelProps) {
+function formatCaptionsForCopy(results: CaptionResult[]): string {
+  return results
+    .map((r) => {
+      const config = STYLE_CONFIG[r.style];
+      return `${config.emoji} ${config.label}\n${r.caption}`;
+    })
+    .join("\n\n");
+}
+
+function formatCaptionsForJson(results: CaptionResult[]): object[] {
+  return results.map((r) => ({
+    style: r.style,
+    label: STYLE_CONFIG[r.style].label,
+    caption: r.caption,
+  }));
+}
+
+function downloadFile(content: string, filename: string, mimeType: string) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+export default function ResultsPanel({
+  results,
+  onRegenerate,
+  regeneratingStyles,
+  onEditCaption,
+}: ResultsPanelProps) {
+  const [viewMode, setViewMode] = useState<ViewMode>("grid");
+  const [copiedAll, setCopiedAll] = useState(false);
+  const [downloadOpen, setDownloadOpen] = useState(false);
+  const downloadRef = useRef<HTMLDivElement>(null);
+
+  // Close download dropdown on outside click
+  useEffect(() => {
+    if (!downloadOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (downloadRef.current && !downloadRef.current.contains(e.target as Node)) {
+        setDownloadOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [downloadOpen]);
+
+  const handleCopyAll = async () => {
+    const text = formatCaptionsForCopy(results);
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    }
+    setCopiedAll(true);
+    setTimeout(() => setCopiedAll(false), 2000);
+    toast.success("All 4 captions copied!");
+  };
+
+  const handleDownloadTxt = () => {
+    const text = formatCaptionsForCopy(results);
+    downloadFile(text, "captions.txt", "text/plain");
+    setDownloadOpen(false);
+  };
+
+  const handleDownloadJson = () => {
+    const json = formatCaptionsForJson(results);
+    downloadFile(JSON.stringify(json, null, 2), "captions.json", "application/json");
+    setDownloadOpen(false);
+  };
+
   if (results.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -38,15 +128,177 @@ export default function ResultsPanel({ results, onRegenerate, regeneratingStyles
   }
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      {results.map((result) => (
-        <CaptionCard
-          key={result.style}
-          result={result}
-          onRegenerate={onRegenerate}
-          isRegenerating={regeneratingStyles.has(result.style)}
-        />
-      ))}
+    <div className="space-y-4">
+      {/* Toolbar */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        {/* Left: count */}
+        <p className="text-sm text-muted-foreground font-medium">
+          {results.length} Caption{results.length !== 1 ? "s" : ""}
+        </p>
+
+        {/* Right: controls */}
+        <div className="flex items-center gap-1">
+          {/* View toggle */}
+          <div className="flex items-center rounded-lg border border-border bg-muted p-0.5 mr-2">
+            <button
+              onClick={() => setViewMode("grid")}
+              className={`
+                p-1.5 rounded-md transition-all duration-150 ease-out
+                active:scale-[0.97]
+                ${viewMode === "grid"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+                }
+              `}
+              aria-label="Grid view"
+              aria-pressed={viewMode === "grid"}
+            >
+              <LayoutGrid className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setViewMode("stack")}
+              className={`
+                p-1.5 rounded-md transition-all duration-150 ease-out
+                active:scale-[0.97]
+                ${viewMode === "stack"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+                }
+              `}
+              aria-label="Stack view"
+              aria-pressed={viewMode === "stack"}
+            >
+              <AlignJustify className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Copy All */}
+          <button
+            onClick={handleCopyAll}
+            className={`
+              inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium
+              transition-all duration-150 ease-out
+              active:scale-[0.97]
+              focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary
+              ${copiedAll
+                ? "bg-emerald-500/15 text-emerald-600"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              }
+            `}
+            aria-label={copiedAll ? "All copied!" : "Copy all captions"}
+          >
+            {copiedAll ? (
+              <Check className="w-3.5 h-3.5" />
+            ) : (
+              <Copy className="w-3.5 h-3.5" />
+            )}
+            <span className="hidden sm:inline">Copy All</span>
+          </button>
+
+          {/* Download */}
+          <div ref={downloadRef} className="relative">
+            <button
+              onClick={() => setDownloadOpen((prev) => !prev)}
+              className={`
+                inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium
+                transition-all duration-150 ease-out
+                active:scale-[0.97]
+                focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary
+                text-muted-foreground hover:bg-muted hover:text-foreground
+              `}
+              aria-label="Download captions"
+              aria-haspopup="true"
+              aria-expanded={downloadOpen}
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Download</span>
+            </button>
+
+            {downloadOpen && (
+              <div
+                className="
+                  absolute right-0 top-full mt-1 w-44 py-1 rounded-lg
+                  bg-background border border-border shadow-lg z-20
+                  animate-in fade-in slide-in-from-top-1 duration-150
+                "
+                role="menu"
+              >
+                <button
+                  onClick={handleDownloadTxt}
+                  className="
+                    w-full flex items-center gap-2 px-3 py-2 text-sm text-foreground
+                    hover:bg-muted transition-colors duration-100
+                  "
+                  role="menuitem"
+                >
+                  <FileText className="w-4 h-4 text-muted-foreground" />
+                  Plain Text (.txt)
+                </button>
+                <button
+                  onClick={handleDownloadJson}
+                  className="
+                    w-full flex items-center gap-2 px-3 py-2 text-sm text-foreground
+                    hover:bg-muted transition-colors duration-100
+                  "
+                  role="menuitem"
+                >
+                  <FileJson className="w-4 h-4 text-muted-foreground" />
+                  JSON (.json)
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Cards */}
+      {viewMode === "grid" ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {results.map((result, i) => (
+            <motion.div
+              key={result.style}
+              initial={{ opacity: 0, y: 20, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{
+                duration: 0.35,
+                delay: i * 0.1,
+                ease: [0.23, 1, 0.32, 1],
+              }}
+            >
+              <CaptionCard
+                result={result}
+                onRegenerate={onRegenerate}
+                isRegenerating={regeneratingStyles.has(result.style)}
+                onEdit={onEditCaption}
+                compact={false}
+              />
+            </motion.div>
+          ))}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {results.map((result, i) => (
+            <motion.div
+              key={result.style}
+              initial={{ opacity: 0, x: -12 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{
+                duration: 0.3,
+                delay: i * 0.08,
+                ease: "easeOut",
+              }}
+            >
+              <CaptionCard
+                result={result}
+                onRegenerate={onRegenerate}
+                isRegenerating={regeneratingStyles.has(result.style)}
+                onEdit={onEditCaption}
+                compact
+              />
+            </motion.div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { Toaster, toast } from "sonner";
 import { Sparkles, Video, RefreshCw } from "lucide-react";
 import { supabase } from "./lib/supabase";
@@ -19,6 +19,26 @@ const FUNCTIONS_URL =
 const ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5zZW9mcWhzbmlubWZ6cW52a3ZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU0MjYyNTIsImV4cCI6MjA4MTAwMjI1Mn0.ynRuG4hEmGCo_KfavnOxWRD72AfxxE1f04100i3ZvCY";
 
+// Step timing estimates (seconds) for status bar ETA
+const STEP_ESTIMATES: Record<string, number> = {
+  compress: 8,
+  upload: 12,
+  frames: 4,
+  transcribe: 6,
+  describe: 40,
+  captions: 30,
+};
+
+// Model name shown per pipeline step
+const STEP_MODELS: Record<string, string | null> = {
+  compress: null,
+  upload: null,
+  frames: null,
+  transcribe: null,
+  describe: "Vision Models",
+  captions: "DeepSeek-V4-Pro",
+};
+
 type AppPhase = "upload" | "processing" | "results";
 
 export default function App() {
@@ -32,6 +52,68 @@ export default function App() {
   const [pipelineStep, setPipelineStep] = useState<PipelineStep>("upload");
   const [pipelineError, setPipelineError] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
+
+  // --- Timing state ---
+  const [stepStartTime, setStepStartTime] = useState<number | null>(null);
+  const [stepElapsed, setStepElapsed] = useState(0);
+  const [stepTimes, setStepTimes] = useState<Record<string, number>>({});
+  const [activeModel, setActiveModel] = useState<string | null>(null);
+  const prevStepRef = useRef<PipelineStep>("upload");
+  const stepElapsedRef = useRef(0);
+
+  // Keep ref in sync with stepElapsed so effects can read latest value
+  useEffect(() => {
+    stepElapsedRef.current = stepElapsed;
+  }, [stepElapsed]);
+
+  // Reset timing when processing starts
+  useEffect(() => {
+    if (phase !== "processing") return;
+    const now = Date.now();
+    setStepStartTime(now);
+    setStepElapsed(0);
+    setStepTimes({});
+    setActiveModel(STEP_MODELS["compress"] || null);
+    prevStepRef.current = "compress";
+  }, [phase]);
+
+  // Save final step time when processing ends
+  useEffect(() => {
+    if (phase === "processing") return;
+    if (prevStepRef.current === "upload") return; // never started
+    // Save the last active step's elapsed time
+    setStepTimes((prev) => {
+      if (prev[prevStepRef.current] !== undefined) return prev; // already saved
+      return { ...prev, [prevStepRef.current]: stepElapsedRef.current };
+    });
+  }, [phase]);
+
+  // Update elapsed timer every second during processing
+  useEffect(() => {
+    if (phase !== "processing") return;
+    const interval = setInterval(() => {
+      setStepElapsed((prev) => prev + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [phase]);
+
+  // Track step transitions — save time for completed step, start new one
+  useEffect(() => {
+    if (phase !== "processing") return;
+    if (prevStepRef.current === pipelineStep) return;
+
+    // Save elapsed for the step we just left (use ref for latest value)
+    setStepTimes((prev) => ({
+      ...prev,
+      [prevStepRef.current]: stepElapsedRef.current,
+    }));
+
+    // Start timing the new step
+    setStepStartTime(Date.now());
+    setStepElapsed(0);
+    setActiveModel(STEP_MODELS[pipelineStep] || null);
+    prevStepRef.current = pipelineStep;
+  }, [pipelineStep, phase]);
 
   // --- Results state ---
   const [results, setResults] = useState<CaptionResult[]>([]);
@@ -238,7 +320,41 @@ export default function App() {
         throw new Error(err.error || "Caption generation failed");
       }
 
-      const { captions } = await genRes.json();
+      const { captions: initialCaptions } = await genRes.json();
+
+      // --- Quality check & retry for empty/bad captions ---
+      const captions = { ...(initialCaptions as CaptionResults) };
+      const stylesToRetry = CAPTION_STYLES.filter(
+        (s) => !captions[s.key] || captions[s.key].trim().length < 15
+      );
+
+      if (stylesToRetry.length > 0) {
+        // Retry each failed style individually (up to 2 attempts each)
+        for (const style of stylesToRetry) {
+          for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+              const retryRes = await fetch(`${FUNCTIONS_URL}/generate-caption`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${ANON_KEY}`,
+                },
+                body: JSON.stringify({ videoContext, style: style.key }),
+              });
+
+              if (retryRes.ok) {
+                const { caption } = await retryRes.json();
+                if (caption && caption.trim().length >= 15) {
+                  captions[style.key] = caption;
+                  break; // got a good one, stop retrying
+                }
+              }
+            } catch {
+              // retry
+            }
+          }
+        }
+      }
 
       // --- Step 9: Save captions to DB ---
       const captionInserts = Object.entries(captions).map(
@@ -262,7 +378,7 @@ export default function App() {
 
       const allResults: CaptionResult[] = CAPTION_STYLES.map((s) => ({
         style: s.key,
-        caption: (captions as CaptionResults)[s.key] || "",
+        caption: captions[s.key] || "",
         loading: false,
         error: null,
       }));
@@ -346,6 +462,18 @@ export default function App() {
           return next;
         });
       }
+    },
+    []
+  );
+
+  const handleEditCaption = useCallback(
+    (style: CaptionStyle, newCaption: string) => {
+      setResults((prev) =>
+        prev.map((r) =>
+          r.style === style ? { ...r, caption: newCaption } : r
+        )
+      );
+      toast.success(`${CAPTION_STYLE_LABELS[style]} caption updated!`);
     },
     []
   );
@@ -522,6 +650,10 @@ export default function App() {
             <ProgressIndicator
               currentStep={pipelineStep}
               error={pipelineError}
+              stepElapsed={stepElapsed}
+              stepTimes={stepTimes}
+              activeModel={activeModel}
+              stepEstimates={STEP_ESTIMATES}
             />
           </div>
         )}
@@ -545,6 +677,7 @@ export default function App() {
               results={results}
               onRegenerate={handleRegenerate}
               regeneratingStyles={regeneratingStyles}
+              onEditCaption={handleEditCaption}
             />
           </div>
         )}
