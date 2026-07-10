@@ -1,4 +1,5 @@
 import { useRef, useState, useCallback } from "react";
+import { motion } from "framer-motion";
 import { Upload, Film, AlertCircle } from "lucide-react";
 
 interface UploadZoneProps {
@@ -16,8 +17,6 @@ export default function UploadZone({ onFileSelected, disabled }: UploadZoneProps
     if (!file.type.startsWith("video/")) {
       return "This doesn't look like a video file. Try an MP4, WebM, or MOV.";
     }
-
-    // We'll validate duration after creating a temp video element
     return null;
   };
 
@@ -31,7 +30,6 @@ export default function UploadZone({ onFileSelected, disabled }: UploadZoneProps
         return;
       }
 
-      // Validate duration
       const video = document.createElement("video");
       video.preload = "metadata";
       video.muted = true;
@@ -127,13 +125,15 @@ export default function UploadZone({ onFileSelected, disabled }: UploadZoneProps
         }}
         className={`
           relative flex flex-col items-center justify-center w-full min-h-[280px]
-          border-2 border-dashed rounded-2xl cursor-pointer
+          rounded-2xl cursor-pointer
           transition-all duration-300 ease-out
-          ${isDragging
-            ? "border-primary bg-primary/5 scale-[1.01] shadow-lg shadow-primary/10"
-            : disabled
-              ? "border-muted-foreground/20 bg-muted/20 cursor-not-allowed"
-              : "border-muted-foreground/30 bg-surface hover:border-primary/50 hover:bg-primary/[0.03]"
+          group
+          ${
+            isDragging
+              ? "glass-panel neon-border scale-[1.01] animate-pulse-glow"
+              : disabled
+                ? "glass-panel border-border/30 cursor-not-allowed opacity-50"
+                : "glass-panel neon-border hover:scale-[1.01]"
           }
           focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary
         `}
@@ -150,33 +150,52 @@ export default function UploadZone({ onFileSelected, disabled }: UploadZoneProps
           disabled={disabled}
         />
 
+        {/* Drag-over glow ring */}
+        {isDragging && (
+          <motion.div
+            className="absolute inset-4 rounded-2xl border-2 border-primary/40"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: [0.4, 0.8, 0.4], scale: [1, 1.02, 1] }}
+            transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
+            style={{ filter: "blur(2px)" }}
+          />
+        )}
+
         <div className="flex flex-col items-center gap-3 px-6 py-8 text-center">
           {isDragging ? (
             <>
-              <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center animate-bounce">
+              <motion.div
+                className="w-16 h-16 rounded-full bg-primary/15 flex items-center justify-center"
+                animate={{ transform: "translateY(-4px)" }}
+                transition={{ duration: 0.6, repeat: Infinity, repeatType: "reverse", ease: "easeInOut" }}
+              >
                 <Film className="w-8 h-8 text-primary" />
-              </div>
-              <p className="text-lg font-semibold text-foreground">
+              </motion.div>
+              <p className="text-lg font-semibold text-foreground neon-text">
                 Drop it like it's hot!
               </p>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-sm text-secondary/80">
                 We'll take it from here
               </p>
             </>
           ) : (
             <>
-              <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
-                <Upload className="w-8 h-8 text-muted-foreground" />
-              </div>
+              <motion.div
+                className="w-16 h-16 rounded-full bg-secondary/10 flex items-center justify-center"
+                animate={{ transform: "translateY(-6px)" }}
+                transition={{ duration: 3, repeat: Infinity, repeatType: "reverse", ease: "easeInOut" }}
+              >
+                <Upload className="w-8 h-8 text-secondary" />
+              </motion.div>
               <div>
                 <p className="text-lg font-semibold text-foreground">
                   Drop your video here
                 </p>
-                <p className="text-sm text-muted-foreground mt-1">
+                <p className="text-sm text-secondary/80 mt-1">
                   or click to browse — MP4, WebM, MOV
                 </p>
               </div>
-              <span className="text-xs text-muted-foreground bg-muted px-3 py-1 rounded-full">
+              <span className="text-xs text-foreground/40 bg-surface px-3 py-1 rounded-full border border-border">
                 30–120 seconds ideal
               </span>
             </>

@@ -1,273 +1,269 @@
-import { Copy, RefreshCw, Check, Save, X } from "lucide-react";
-import { useState, useRef, useEffect, useCallback } from "react";
-import { motion } from "framer-motion";
-import { CaptionStyle, CaptionResult } from "../types";
+import React, { useState, useRef, useCallback } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Copy, Check, Loader2, AlertCircle, ChevronDown } from "lucide-react";
+import { GlitchText } from "./GlitchText";
+import { CaptionResult, CaptionStyle } from "../types";
 import { STYLE_CONFIG } from "../utils/styleConfig";
 
 interface CaptionCardProps {
   result: CaptionResult;
-  onRegenerate: (style: CaptionStyle) => void;
-  isRegenerating: boolean;
-  onEdit?: (style: CaptionStyle, newCaption: string) => void;
-  compact?: boolean;
 }
 
-export default function CaptionCard({
-  result,
-  onRegenerate,
-  isRegenerating,
-  onEdit,
-  compact = false,
-}: CaptionCardProps) {
+const springTransition = { type: "spring" as const, stiffness: 500, damping: 30 };
+
+const copyButtonVariants = {
+  idle: { scale: 1, backgroundColor: "transparent" },
+  success: {
+    scale: [1, 1.03, 1],
+    backgroundColor: ["rgba(0,255,136,0)", "rgba(0,255,136,0.18)", "rgba(0,255,136,0)"],
+    transition: { duration: 0.3 },
+  },
+};
+
+export const CaptionCard: React.FC<CaptionCardProps> = ({ result }) => {
+  const { style, caption, loading, error, retrying } = result;
+  const styleCfg = STYLE_CONFIG[style];
   const [copied, setCopied] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
-  const [editText, setEditText] = useState(result.caption);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const config = STYLE_CONFIG[result.style];
+  const [expanded, setExpanded] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const [tilt, setTilt] = useState({ x: 0, y: 0 });
 
-  // Sync editText when result.caption changes externally (e.g. regenerate)
-  useEffect(() => {
-    if (!isEditing) {
-      setEditText(result.caption);
-    }
-  }, [result.caption, isEditing]);
+  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (!cardRef.current) return;
+    const rect = cardRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const centerX = rect.width / 2;
+    const centerY = rect.height / 2;
+    const rotateX = ((y - centerY) / centerY) * -8;
+    const rotateY = ((x - centerX) / centerX) * 8;
+    setTilt({ x: rotateX, y: rotateY });
+  }, []);
 
-  // Auto-focus and select textarea when editing starts
-  useEffect(() => {
-    if (isEditing && textareaRef.current) {
-      textareaRef.current.focus();
-      textareaRef.current.setSelectionRange(
-        textareaRef.current.value.length,
-        textareaRef.current.value.length
-      );
-    }
-  }, [isEditing]);
+  const handleMouseLeave = useCallback(() => {
+    setTilt({ x: 0, y: 0 });
+  }, []);
 
-  const handleCopy = async () => {
+  const handleCopy = useCallback(async () => {
+    if (!caption) return;
     try {
-      await navigator.clipboard.writeText(result.caption);
+      await navigator.clipboard.writeText(caption);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      const ta = document.createElement("textarea");
-      ta.value = result.caption;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
+      // Fallback for non-secure contexts
+      const textarea = document.createElement("textarea");
+      textarea.value = caption;
+      document.body.appendChild(textarea);
+      textarea.select();
       document.execCommand("copy");
-      document.body.removeChild(ta);
+      document.body.removeChild(textarea);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
-  };
+  }, [caption]);
 
-  const handleStartEdit = () => {
-    if (result.loading || result.error || !onEdit) return;
-    setEditText(result.caption);
-    setIsEditing(true);
-  };
-
-  const handleSave = useCallback(() => {
-    const trimmed = editText.trim();
-    if (trimmed && trimmed !== result.caption && onEdit) {
-      onEdit(result.style, trimmed);
+  const getStatusBadge = () => {
+    if (retrying) {
+      return (
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full
+          bg-style-sarcastic/10 border border-style-sarcastic/30 text-style-sarcastic/80 text-xs">
+          <motion.span
+            animate={{ opacity: [1, 0.4, 1] }}
+            transition={{ duration: 1, repeat: Infinity, ease: "easeInOut" }}
+          >
+            <Loader2 className="w-3 h-3 animate-spin" />
+          </motion.span>
+          Retrying…
+        </div>
+      );
     }
-    setIsEditing(false);
-  }, [editText, result.caption, result.style, onEdit]);
-
-  const handleCancel = useCallback(() => {
-    setEditText(result.caption);
-    setIsEditing(false);
-  }, [result.caption]);
-
-  // Keyboard shortcuts
-  useEffect(() => {
-    if (!isEditing) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        handleCancel();
-      } else if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-        e.preventDefault();
-        handleSave();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isEditing, handleSave, handleCancel]);
-
-  // --- Action buttons (shared between compact and full layouts) ---
-  const actionButtons = (
-    <div className="flex items-center gap-1">
-      {/* Regenerate */}
-      <button
-        onClick={() => onRegenerate(result.style)}
-        disabled={isRegenerating || isEditing}
-        className={`
-          p-2 rounded-lg text-muted-foreground
-          hover:bg-muted hover:text-foreground
-          transition-all duration-150 ease-out
-          active:scale-[0.97]
-          focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary
-          disabled:opacity-50 disabled:cursor-not-allowed
-        `}
-        aria-label={`Regenerate ${config.label} caption`}
-      >
-        <RefreshCw
-          className={`w-4 h-4 ${isRegenerating ? "animate-spin" : ""}`}
-        />
-      </button>
-
-      {/* Copy */}
-      <button
-        onClick={handleCopy}
-        disabled={isEditing}
-        className={`
-          p-2 rounded-lg
-          transition-all duration-150 ease-out
-          active:scale-[0.97]
-          focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary
-          ${copied
-            ? "bg-emerald-500/15 text-emerald-600"
-            : "text-muted-foreground hover:bg-muted hover:text-foreground"
-          }
-        `}
-        aria-label={copied ? "Copied!" : `Copy ${config.label} caption`}
-      >
-        {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-      </button>
-    </div>
-  );
-
-  // --- Caption content (shared) ---
-  const captionContent = (
-    <div className="flex-1 min-w-0">
-      {result.loading ? (
-        <div className="space-y-2 animate-pulse">
-          <div className="h-3 bg-muted rounded w-full" />
-          <div className="h-3 bg-muted rounded w-3/4" />
-          <div className="h-3 bg-muted rounded w-1/2" />
+    if (loading) {
+      return (
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full
+          bg-secondary/10 border border-secondary/30 text-secondary/80 text-xs">
+          <Loader2 className="w-3 h-3 animate-spin" />
+          Generating…
         </div>
-      ) : result.error ? (
-        <p className="text-sm text-destructive italic">{result.error}</p>
-      ) : isEditing ? (
-        <div className="space-y-2">
-          <textarea
-            ref={textareaRef}
-            value={editText}
-            onChange={(e) => setEditText(e.target.value)}
-            className="
-              w-full min-h-[80px] p-3 resize-y rounded-lg
-              text-sm text-foreground leading-relaxed
-              bg-background border border-primary/30
-              focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20
-              transition-all duration-150
-              placeholder:text-muted-foreground
-            "
-            placeholder="Write your caption..."
-            rows={3}
-          />
-          <div className="flex items-center justify-end gap-1">
-            <button
-              onClick={handleCancel}
-              className="
-                p-1.5 rounded-lg text-muted-foreground
-                hover:bg-muted hover:text-foreground
-                transition-all duration-150 ease-out
-                active:scale-[0.97]
-              "
-              aria-label="Cancel editing"
-            >
-              <X className="w-4 h-4" />
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={!editText.trim()}
-              className="
-                p-1.5 rounded-lg
-                bg-primary/15 text-primary
-                hover:bg-primary/25
-                transition-all duration-150 ease-out
-                active:scale-[0.97]
-                disabled:opacity-40 disabled:cursor-not-allowed
-              "
-              aria-label="Save caption"
-            >
-              <Save className="w-4 h-4" />
-            </button>
-          </div>
+      );
+    }
+    if (error) {
+      return (
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full
+          bg-style-sarcastic/10 border border-style-sarcastic/30 text-style-sarcastic/80 text-xs">
+          <AlertCircle className="w-3 h-3" />
+          Error
         </div>
-      ) : (
-        <p
-          onClick={handleStartEdit}
-          className={`
-            text-sm text-foreground leading-relaxed whitespace-pre-wrap
-            ${onEdit ? "cursor-pointer rounded-lg -mx-1.5 -my-1 px-1.5 py-1 hover:bg-foreground/5 transition-colors duration-100" : ""}
-          `}
-          title={onEdit ? "Click to edit" : undefined}
-        >
-          {result.caption || "Waiting..."}
-        </p>
-      )}
-    </div>
-  );
-
-  // --- Compact layout (stacked view) ---
-  if (compact) {
+      );
+    }
+    if (caption) {
+      return (
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full
+          bg-style-humorous-tech/10 border border-style-humorous-tech/30 text-style-humorous-tech/80 text-xs">
+          <Check className="w-3 h-3" />
+          Ready
+        </div>
+      );
+    }
     return (
-      <motion.div
-        whileHover={{ y: -2, boxShadow: "0 8px 25px rgba(0,0,0,0.08)" }}
-        className={`
-          relative flex items-start gap-4 p-4 rounded-xl border bg-muted
-          bg-gradient-to-br ${config.gradient}
-          transition-all duration-300 ease-out
-        `}
-      >
-        {/* Left: emoji + label */}
-        <div className="flex-shrink-0 flex items-center gap-2 min-w-[130px] pt-0.5">
-          <span className="text-lg" role="img" aria-hidden="true">
-            {config.emoji}
-          </span>
-          <h3 className="font-heading font-semibold text-foreground text-sm whitespace-nowrap">
-            {config.label}
-          </h3>
-        </div>
-
-        {/* Center: caption */}
-        {captionContent}
-
-        {/* Right: actions */}
-        <div className="flex-shrink-0">{actionButtons}</div>
-      </motion.div>
+      <div className="flex items-center gap-2 px-3 py-1.5 rounded-full
+        bg-primary/10 border border-primary/20 text-primary/50 text-xs">
+        Pending
+      </div>
     );
-  }
+  };
 
-  // --- Full card layout (grid view) ---
   return (
     <motion.div
-      whileHover={{ y: -2, boxShadow: "0 8px 25px rgba(0,0,0,0.08)" }}
-      className={`
-        relative flex flex-col p-5 rounded-xl border bg-muted
-        bg-gradient-to-br ${config.gradient}
-        transition-all duration-300 ease-out
-      `}
+      ref={cardRef}
+      data-style={style}
+      className="glass-panel neon-border rounded-lg p-0.5 overflow-hidden w-full
+        group/card cursor-pointer"
+      style={{
+        transformPerspective: 1000,
+      }}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
+      whileTap={{ scale: 0.98 }}
     >
-      {/* Header */}
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <span className="text-xl" role="img" aria-hidden="true">
-            {config.emoji}
-          </span>
-          <h3 className="font-heading font-semibold text-foreground text-sm">
-            {config.label}
-          </h3>
-        </div>
-        {actionButtons}
-      </div>
+      {/* Inner container for 3D tilt */}
+      <motion.div
+        className="rounded-[7px] overflow-hidden bg-muted/60 h-full scanline-overlay"
+        style={{
+          rotateX: tilt.x,
+          rotateY: tilt.y,
+          borderLeft: `4px solid ${styleCfg.accentColor}`,
+        }}
+        transition={springTransition}
+      >
 
-      {/* Caption text */}
-      {captionContent}
+        {/* Header */}
+        <div className="relative flex items-center justify-between p-4 pb-2 z-10">
+          <div className="flex items-center gap-2">
+            <span className="text-lg" role="img" aria-label={styleCfg.label}>
+              {styleCfg.emoji}
+            </span>
+            <GlitchText
+              as="h3"
+              className="text-sm font-heading font-bold text-secondary tracking-wider uppercase"
+              colorA="var(--color-secondary)"
+              colorB="var(--color-primary)"
+            >
+              {styleCfg.label}
+            </GlitchText>
+          </div>
+          <div className="flex items-center gap-2">
+            {getStatusBadge()}
+            <motion.button
+              onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
+              className="p-1 rounded-full text-foreground/40 hover:text-secondary
+                transition-all duration-200 hover:bg-secondary/10"
+              whileTap={{ scale: 0.9 }}
+              aria-label={expanded ? "Collapse" : "Expand"}
+            >
+              <motion.span
+                animate={{ rotate: expanded ? 180 : 0 }}
+                transition={{ duration: 0.2 }}
+              >
+                <ChevronDown className="w-4 h-4" />
+              </motion.span>
+            </motion.button>
+          </div>
+        </div>
+
+        {/* Caption Body */}
+        <div className="px-4 pb-2 relative z-10">
+          {retrying ? (
+            <div className="space-y-2">
+              <motion.div
+                className="h-4 rounded bg-gradient-to-r from-muted/60 via-primary/10 to-muted/60 bg-[length:200%_100%]"
+                animate={{ backgroundPosition: ["200% 0", "-200% 0"] }}
+                transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
+              />
+              <motion.div
+                className="h-4 w-3/4 rounded bg-gradient-to-r from-muted/60 via-primary/10 to-muted/60 bg-[length:200%_100%]"
+                animate={{ backgroundPosition: ["200% 0", "-200% 0"] }}
+                transition={{ duration: 1.5, repeat: Infinity, ease: "linear", delay: 0.2 }}
+              />
+              <motion.div
+                className="h-4 w-1/2 rounded bg-gradient-to-r from-muted/60 via-primary/10 to-muted/60 bg-[length:200%_100%]"
+                animate={{ backgroundPosition: ["200% 0", "-200% 0"] }}
+                transition={{ duration: 1.5, repeat: Infinity, ease: "linear", delay: 0.4 }}
+              />
+            </div>
+          ) : (
+            <p
+              className={`text-sm font-mono leading-relaxed text-foreground/90
+                ${!expanded ? "line-clamp-3" : ""}
+                ${!caption && !loading ? "text-foreground/30 italic" : ""}`}
+            >
+              {caption || "Awaiting generation…"}
+            </p>
+          )}
+        </div>
+
+        {/* Expanded — Full Caption + Copy */}
+        <AnimatePresence>
+          {expanded && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="overflow-hidden"
+            >
+              <div className="px-4 pt-1 pb-3 border-t border-secondary/10 relative z-10">
+                {/* Copy Button */}
+                <motion.button
+                  onClick={(e) => { e.stopPropagation(); handleCopy(); }}
+                  variants={copyButtonVariants}
+                  animate={copied ? "success" : "idle"}
+                  disabled={!caption}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium
+                    transition-all duration-200 mt-2
+                    ${copied
+                      ? "bg-style-humorous-tech/20 text-style-humorous-tech border border-style-humorous-tech/40"
+                      : caption
+                        ? "bg-secondary/10 text-secondary border border-secondary/30 hover:bg-secondary/20"
+                        : "bg-muted/50 text-foreground/20 border border-muted/50 cursor-not-allowed"
+                    }`}
+                >
+                  {copied ? (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      Copied!
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      Copy Caption
+                    </>
+                  )}
+                </motion.button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Error Message */}
+        {error && (
+          <div className="px-4 pb-3 relative z-10">
+            <p className="text-xs text-style-sarcastic/70 flex items-center gap-1.5">
+              <AlertCircle className="w-3 h-3 shrink-0" />
+              {error}
+            </p>
+          </div>
+        )}
+
+        {/* Style Neon Bar */}
+        <div
+          className="h-[2px] w-full mt-1 relative z-10"
+          style={{
+            background: `linear-gradient(90deg, transparent, ${styleCfg.accentColor}, transparent)`,
+            opacity: 0.6,
+          }}
+        />
+      </motion.div>
     </motion.div>
   );
-}
+};

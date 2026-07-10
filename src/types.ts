@@ -66,12 +66,20 @@ export const CAPTION_STYLES: {
   },
 ];
 
+/** Caption validation result from captionValidator */
+export interface ValidationResult {
+  valid: boolean;
+  reason?: string;   // why it failed (for logging)
+  cleaned?: string;  // best-effort cleaned version
+}
+
 /** UI-level caption state for rendering */
 export interface CaptionResult {
   style: CaptionStyle;
   caption: string;
   loading: boolean;
   error: string | null;
+  retrying?: boolean;  // set when the system is auto-retrying this caption
 }
 
 export const CAPTION_STYLE_LABELS: Record<CaptionStyle, string> = {

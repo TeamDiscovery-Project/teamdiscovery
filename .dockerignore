@@ -1,0 +1,8 @@
+node_modules
+dist
+.git
+*.md
+prd/
+design-system/
+.env*
+.DS_Store

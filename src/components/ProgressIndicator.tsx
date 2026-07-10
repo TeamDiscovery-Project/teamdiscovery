@@ -35,6 +35,71 @@ function formatTime(seconds: number): string {
   return `${m}m ${s}s`;
 }
 
+function Diamond({
+  state,
+  children,
+}: {
+  state: "done" | "active" | "idle";
+  children: React.ReactNode;
+}) {
+  const baseClasses =
+    "relative w-11 h-11 flex items-center justify-center flex-shrink-0 transition-colors duration-500";
+
+  const stateClasses =
+    state === "done"
+      ? "bg-style-humorous-tech/20 text-style-humorous-tech rotate-45"
+      : state === "active"
+        ? "bg-primary/15 text-primary rotate-45"
+        : "bg-muted/30 text-foreground/40 rotate-45";
+
+  return (
+    <motion.div
+      className={`${baseClasses} ${stateClasses}`}
+      style={{ clipPath: "polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)" }}
+      animate={
+        state === "active"
+          ? {
+              boxShadow: [
+                "0 0 6px 1px rgba(0,240,255,0.25)",
+                "0 0 18px 4px rgba(0,240,255,0.5)",
+                "0 0 6px 1px rgba(0,240,255,0.25)",
+              ],
+            }
+          : {}
+      }
+      transition={{
+        duration: 2,
+        repeat: state === "active" ? Infinity : 0,
+        ease: "easeInOut",
+      }}
+    >
+      {/* Inner content (counter-rotated) */}
+      <span className="relative -rotate-45 flex items-center justify-center">
+        {children}
+      </span>
+    </motion.div>
+  );
+}
+
+function ConnectingLine({
+  state,
+}: {
+  state: "done" | "active" | "idle";
+}) {
+  return (
+    <div className="flex-1 flex items-center px-0.5 min-w-[8px]">
+      <div
+        className={`
+          h-[2px] w-full transition-all duration-500
+          ${state === "done" ? "bg-gradient-to-r from-style-humorous-tech to-style-humorous-tech" : ""}
+          ${state === "active" ? "bg-gradient-to-r from-style-humorous-tech to-primary/30" : ""}
+          ${state === "idle" ? "bg-border/30" : ""}
+        `}
+      />
+    </div>
+  );
+}
+
 export default function ProgressIndicator({
   currentStep,
   error,
@@ -47,15 +112,15 @@ export default function ProgressIndicator({
 
   return (
     <div className="space-y-6">
-      {/* Step indicators */}
-      <div className="flex items-start gap-2 sm:gap-3">
+      {/* Circuit-node step indicators */}
+      <div className="flex items-center gap-0">
         {STEPS.map((step, i) => {
           const stepState =
             currentStep === "done" || i < currentIndex
               ? "done"
               : i === currentIndex
-              ? "active"
-              : "idle";
+                ? "active"
+                : "idle";
 
           const isDone = stepState === "done";
           const isActive = stepState === "active";
@@ -63,75 +128,52 @@ export default function ProgressIndicator({
           return (
             <div
               key={step.key}
-              className="flex-1 flex flex-col items-center gap-2 min-w-0"
+              className="flex-1 flex flex-col items-center gap-2.5 min-w-0"
             >
-              {/* Icon circle */}
-              <motion.div
-                className={`
-                  relative w-10 h-10 rounded-full flex items-center justify-center
-                  flex-shrink-0 transition-colors duration-300
-                  ${
-                    isDone
-                      ? "bg-primary text-on-primary"
-                      : isActive
-                      ? "bg-primary/15 text-primary ring-2 ring-primary/40"
-                      : "bg-muted text-muted-foreground"
-                  }
-                `}
-                animate={
-                  isActive
-                    ? {
-                        boxShadow: [
-                          "0 0 0 0px rgba(var(--color-primary-rgb, 99, 102, 241), 0.4)",
-                          "0 0 0 8px rgba(var(--color-primary-rgb, 99, 102, 241), 0)",
-                        ],
-                      }
-                    : {}
-                }
-                transition={{
-                  duration: 2,
-                  repeat: isActive ? Infinity : 0,
-                  ease: "easeInOut",
-                }}
-              >
-                {error && isActive ? (
-                  <AlertCircle className="w-5 h-5 text-destructive" />
-                ) : isDone ? (
-                  <Check className="w-5 h-5" />
-                ) : isActive ? (
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                ) : (
-                  <span className="text-xs font-semibold">{i + 1}</span>
-                )}
-
-                {/* Active glow ring */}
-                {isActive && (
-                  <motion.div
-                    className="absolute inset-0 rounded-full border-2 border-primary/50"
-                    animate={{ scale: [1, 1.15, 1], opacity: [0.6, 0.2, 0.6] }}
-                    transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
+              <div className="flex items-center w-full">
+                {/* Leading connector */}
+                {i > 0 && (
+                  <ConnectingLine
+                    state={
+                      isDone || isActive ? (isActive ? "active" : "done") : "idle"
+                    }
                   />
                 )}
-              </motion.div>
+
+                {/* Diamond node */}
+                <Diamond state={stepState}>
+                  {error && isActive ? (
+                    <AlertCircle className="w-5 h-5 text-destructive" />
+                  ) : isDone ? (
+                    <Check className="w-5 h-5" />
+                  ) : isActive ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <span className="text-xs font-semibold">{i + 1}</span>
+                  )}
+                </Diamond>
+
+                {/* Trailing connector */}
+                {i < STEPS.length - 1 && (
+                  <ConnectingLine
+                    state={
+                      isDone ? "done" : isActive ? "active" : "idle"
+                    }
+                  />
+                )}
+              </div>
 
               {/* Label */}
               <span
                 className={`
-                  text-[10px] sm:text-xs text-center leading-tight
+                  text-[10px] sm:text-xs text-center leading-tight px-1
                   transition-colors duration-300
-                  ${isActive ? "text-foreground font-semibold" : "text-muted-foreground"}
+                  ${isActive ? "text-secondary font-semibold" : "text-foreground/40"}
                 `}
               >
                 {step.label}
               </span>
 
-              {/* Completed duration badge */}
-              {isDone && stepTimes[step.key] !== undefined && (
-                <span className="text-[10px] text-muted-foreground/70 flex items-center gap-1">
-                  <Clock className="w-3 h-3" />
-                  {formatTime(stepTimes[step.key])}
-                </span>
-              )}
             </div>
           );
         })}
@@ -142,11 +184,11 @@ export default function ProgressIndicator({
         <motion.div
           initial={{ opacity: 0, y: 4 }}
           animate={{ opacity: 1, y: 0 }}
-          className="flex items-center justify-center gap-4 text-xs text-muted-foreground bg-muted/50 rounded-xl px-4 py-2.5 border border-border/50"
+          className="glass-panel flex flex-wrap items-center justify-center gap-3 sm:gap-4 text-xs text-foreground/40 rounded-xl px-4 py-2.5"
         >
           {/* Model badge */}
           {activeModel && (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/10 text-primary font-medium">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/10 text-primary font-medium border border-primary/20">
               <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
               {activeModel}
             </span>
@@ -154,13 +196,13 @@ export default function ProgressIndicator({
 
           {/* Timer */}
           <span className="flex items-center gap-1.5">
-            <Clock className="w-3.5 h-3.5" />
+            <Clock className="w-3.5 h-3.5 text-secondary" />
             Elapsed: {formatTime(stepElapsed)}
           </span>
 
           {/* ETA */}
           {stepEstimates[currentStep] && (
-            <span className="text-muted-foreground/60">
+            <span className="text-foreground/20">
               ~{formatTime(stepEstimates[currentStep])} estimated
             </span>
           )}

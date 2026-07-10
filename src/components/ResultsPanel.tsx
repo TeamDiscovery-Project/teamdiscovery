@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { LayoutGrid, AlignJustify, Copy, Check, Download, FileText, FileJson } from "lucide-react";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
-import CaptionCard from "./CaptionCard";
+import { CaptionCard } from "./CaptionCard";
 import { CaptionStyle, CaptionResult } from "../types";
 import { STYLE_CONFIG } from "../utils/styleConfig";
 
@@ -100,10 +100,10 @@ export default function ResultsPanel({
 
   if (results.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 text-center">
+      <div className="glass-panel rounded-2xl p-8 flex flex-col items-center justify-center py-16 text-center">
         <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4">
           <svg
-            className="w-8 h-8 text-muted-foreground"
+            className="w-8 h-8 text-foreground/30"
             fill="none"
             viewBox="0 0 24 24"
             strokeWidth={1.5}
@@ -119,7 +119,7 @@ export default function ResultsPanel({
         <h3 className="font-heading font-semibold text-foreground text-lg mb-1">
           Your captions will appear here
         </h3>
-        <p className="text-sm text-muted-foreground max-w-sm">
+        <p className="text-sm text-foreground/40 max-w-sm">
           Upload a video and we'll generate four unique caption styles — each with
           its own personality. The magic starts when you hit that upload button!
         </p>
@@ -128,26 +128,26 @@ export default function ResultsPanel({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="glass-panel rounded-2xl p-4 md:p-6 space-y-4">
       {/* Toolbar */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         {/* Left: count */}
-        <p className="text-sm text-muted-foreground font-medium">
+        <p className="text-sm neon-text-cyan font-medium">
           {results.length} Caption{results.length !== 1 ? "s" : ""}
         </p>
 
         {/* Right: controls */}
         <div className="flex items-center gap-1">
-          {/* View toggle */}
-          <div className="flex items-center rounded-lg border border-border bg-muted p-0.5 mr-2">
+          {/* View toggle — neon styled */}
+          <div className="flex items-center rounded-lg overflow-hidden neon-border mr-2">
             <button
               onClick={() => setViewMode("grid")}
               className={`
-                p-1.5 rounded-md transition-all duration-150 ease-out
+                p-1.5 transition-all duration-150 ease-out
                 active:scale-[0.97]
                 ${viewMode === "grid"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
+                  ? "bg-accent text-white shadow-[0_0_10px_var(--color-accent)]"
+                  : "text-foreground/40 hover:text-foreground/80 bg-background/30"
                 }
               `}
               aria-label="Grid view"
@@ -158,11 +158,11 @@ export default function ResultsPanel({
             <button
               onClick={() => setViewMode("stack")}
               className={`
-                p-1.5 rounded-md transition-all duration-150 ease-out
+                p-1.5 transition-all duration-150 ease-out
                 active:scale-[0.97]
                 ${viewMode === "stack"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
+                  ? "bg-accent text-white shadow-[0_0_10px_var(--color-accent)]"
+                  : "text-foreground/40 hover:text-foreground/80 bg-background/30"
                 }
               `}
               aria-label="Stack view"
@@ -179,10 +179,10 @@ export default function ResultsPanel({
               inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium
               transition-all duration-150 ease-out
               active:scale-[0.97]
-              focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary
+              focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-secondary
               ${copiedAll
-                ? "bg-emerald-500/15 text-emerald-600"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                ? "bg-secondary/15 text-secondary shadow-[0_0_8px_var(--color-secondary)]"
+                : "text-foreground/40 hover:text-foreground/80"
               }
             `}
             aria-label={copiedAll ? "All copied!" : "Copy all captions"}
@@ -203,8 +203,8 @@ export default function ResultsPanel({
                 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium
                 transition-all duration-150 ease-out
                 active:scale-[0.97]
-                focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary
-                text-muted-foreground hover:bg-muted hover:text-foreground
+                focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-secondary
+                text-foreground/40 hover:text-foreground/80
               `}
               aria-label="Download captions"
               aria-haspopup="true"
@@ -215,11 +215,13 @@ export default function ResultsPanel({
             </button>
 
             {downloadOpen && (
-              <div
+              <motion.div
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.15 }}
                 className="
                   absolute right-0 top-full mt-1 w-44 py-1 rounded-lg
-                  bg-background border border-border shadow-lg z-20
-                  animate-in fade-in slide-in-from-top-1 duration-150
+                  glass-panel border border-white/5 shadow-lg z-20
                 "
                 role="menu"
               >
@@ -227,29 +229,32 @@ export default function ResultsPanel({
                   onClick={handleDownloadTxt}
                   className="
                     w-full flex items-center gap-2 px-3 py-2 text-sm text-foreground
-                    hover:bg-muted transition-colors duration-100
+                    hover:bg-white/5 transition-colors duration-100
                   "
                   role="menuitem"
                 >
-                  <FileText className="w-4 h-4 text-muted-foreground" />
+                  <FileText className="w-4 h-4 text-foreground/40" />
                   Plain Text (.txt)
                 </button>
                 <button
                   onClick={handleDownloadJson}
                   className="
                     w-full flex items-center gap-2 px-3 py-2 text-sm text-foreground
-                    hover:bg-muted transition-colors duration-100
+                    hover:bg-white/5 transition-colors duration-100
                   "
                   role="menuitem"
                 >
-                  <FileJson className="w-4 h-4 text-muted-foreground" />
+                  <FileJson className="w-4 h-4 text-foreground/40" />
                   JSON (.json)
                 </button>
-              </div>
+              </motion.div>
             )}
           </div>
         </div>
       </div>
+
+      {/* Neon divider */}
+      <div className="neon-divider" />
 
       {/* Cards */}
       {viewMode === "grid" ? (
@@ -267,10 +272,6 @@ export default function ResultsPanel({
             >
               <CaptionCard
                 result={result}
-                onRegenerate={onRegenerate}
-                isRegenerating={regeneratingStyles.has(result.style)}
-                onEdit={onEditCaption}
-                compact={false}
               />
             </motion.div>
           ))}
@@ -290,10 +291,6 @@ export default function ResultsPanel({
             >
               <CaptionCard
                 result={result}
-                onRegenerate={onRegenerate}
-                isRegenerating={regeneratingStyles.has(result.style)}
-                onEdit={onEditCaption}
-                compact
               />
             </motion.div>
           ))}

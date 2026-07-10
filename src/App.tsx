@@ -1,15 +1,19 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { Toaster, toast } from "sonner";
 import { Sparkles, Video, RefreshCw } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
 import { supabase } from "./lib/supabase";
 import { extractFrames } from "./utils/frameExtractor";
 import { compressVideo } from "./utils/videoCompressor";
 import { extractAudio } from "./utils/audioExtractor";
+import AnimatedBackground from "./components/AnimatedBackground";
+import NeonFrame from "./components/NeonFrame";
 import UploadZone from "./components/UploadZone";
 import ProgressIndicator, { type PipelineStep } from "./components/ProgressIndicator";
 import ResultsPanel from "./components/ResultsPanel";
 import type { CaptionStyle, CaptionResult, CaptionResults } from "./types";
 import { CAPTION_STYLES, CAPTION_STYLE_LABELS } from "./types";
+import { validateCaption } from "./utils/captionValidator";
 
 // Edge function base URL
 const FUNCTIONS_URL =
@@ -28,26 +32,6 @@ const STEP_ESTIMATES: Record<string, number> = {
   describe: 40,
   captions: 30,
 };
-
-// Client-side caption cleaning — strips reasoning prefixes that leak through
-function clientCleanCaption(raw: string): string {
-  if (!raw) return "";
-  let c = raw.trim();
-
-  // Strip emojis
-  c = c.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{200D}]/gu, "").trim();
-
-  // Strip surrounding quotes
-  c = c.replace(/^["']|["']$/g, "").trim();
-
-  // Strip known reasoning prefixes: "Possible ideas:", "Humor angle:", "Possible caption:", etc.
-  c = c.replace(/^(?:possible\s+(?:ideas|caption|option|response)|humor\s+angle|here.?s\s+(?:a|some|the)|here\s+are|nature.?s\s+blockbuster)\s*[:\-–—]\s*/i, "").trim();
-
-  // Strip "Caption:" / "Output:" / "Formal caption:" style prefixes
-  c = c.replace(/^(?:(?:humorous|formal|sarcastic|funny|witty|clever|tech|non-tech|casual|professional)\s+)?(?:caption|response|output|result)\s*[:\-–—]\s*/i, "").trim();
-
-  return c;
-}
 
 // Model name shown per pipeline step
 const STEP_MODELS: Record<string, string | null> = {
@@ -343,20 +327,34 @@ export default function App() {
 
       const { captions: initialCaptions } = await genRes.json();
 
-      // --- Clean & quality check captions ---
+      // --- Clean & validate initial captions ---
       const captions: CaptionResults = {} as CaptionResults;
+      const MAX_RETRIES = 3;
+      const RETRY_BACKOFF_MS = [0, 500, 1000]; // progressive delays
+
       for (const style of CAPTION_STYLES) {
-        captions[style.key] = clientCleanCaption(initialCaptions[style.key] || "");
+        const raw = initialCaptions[style.key] || "";
+        const validation = validateCaption(raw);
+        if (validation.valid && validation.cleaned) {
+          captions[style.key] = validation.cleaned;
+        } else {
+          captions[style.key] = ""; // mark for retry
+        }
       }
 
       const stylesToRetry = CAPTION_STYLES.filter(
-        (s) => !captions[s.key] || captions[s.key].trim().length < 15
+        (s) => !captions[s.key]
       );
 
       if (stylesToRetry.length > 0) {
-        // Retry each failed style individually (up to 2 attempts each)
+        // Retry each failed style individually with progressive backoff
         for (const style of stylesToRetry) {
-          for (let attempt = 0; attempt < 2; attempt++) {
+          for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+            // Brief backoff before retry (skip for first attempt)
+            if (attempt > 0) {
+              await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS[attempt]));
+            }
+
             try {
               const retryRes = await fetch(`${FUNCTIONS_URL}/generate-caption`, {
                 method: "POST",
@@ -364,19 +362,23 @@ export default function App() {
                   "Content-Type": "application/json",
                   Authorization: `Bearer ${ANON_KEY}`,
                 },
-                body: JSON.stringify({ videoContext, style: style.key }),
+                body: JSON.stringify({
+                  videoContext,
+                  style: style.key,
+                  retryAttempt: attempt,
+                }),
               });
 
               if (retryRes.ok) {
                 const { caption } = await retryRes.json();
-                const cleaned = clientCleanCaption(caption || "");
-                if (cleaned && cleaned.length >= 15) {
-                  captions[style.key] = cleaned;
-                  break; // got a good one, stop retrying
+                const retryValidation = validateCaption(caption || "");
+                if (retryValidation.valid && retryValidation.cleaned) {
+                  captions[style.key] = retryValidation.cleaned;
+                  break; // got a valid caption, stop retrying
                 }
               }
             } catch {
-              // retry
+              // network error — will retry if attempts remain
             }
           }
         }
@@ -398,6 +400,17 @@ export default function App() {
         .from("jobs")
         .update({ status: "ready" })
         .eq("id", jid);
+
+      // --- Check if all captions failed validation ---
+      const validCaptionCount = Object.values(captions).filter(Boolean).length;
+      if (validCaptionCount === 0) {
+        setPipelineError(
+          "We couldn't generate quality captions for this video. The AI had trouble understanding this clip — try a shorter video with clearer scenes."
+        );
+        toast.error("No quality captions could be generated. Please try a different video.");
+        setPhase("upload");
+        return;
+      }
 
       // --- Done ---
       setPipelineStep("done");
@@ -434,55 +447,92 @@ export default function App() {
 
       setRegeneratingStyles((prev) => new Set(prev).add(style));
 
-      // Set the specific card to loading state
+      // Set the specific card to retrying state
       setResults((prev) =>
         prev.map((r) =>
-          r.style === style ? { ...r, loading: true, error: null } : r
+          r.style === style ? { ...r, retrying: true, error: null } : r
         )
       );
 
+      const REGEN_MAX_RETRIES = 3;
+      const REGEN_BACKOFF_MS = [0, 600, 1200];
+
+      let succeeded = false;
+
       try {
-        const res = await fetch(
-          `${FUNCTIONS_URL}/generate-caption`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${ANON_KEY}`,
-            },
-            body: JSON.stringify({ videoContext, style }),
+        for (let attempt = 0; attempt < REGEN_MAX_RETRIES; attempt++) {
+          if (attempt > 0) {
+            await new Promise((r) => setTimeout(r, REGEN_BACKOFF_MS[attempt]));
           }
-        );
 
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.error || "Regeneration failed");
+          try {
+            const res = await fetch(
+              `${FUNCTIONS_URL}/generate-caption`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${ANON_KEY}`,
+                },
+                body: JSON.stringify({ videoContext, style, retryAttempt: attempt }),
+              }
+            );
+
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({}));
+              if (attempt === REGEN_MAX_RETRIES - 1) {
+                throw new Error(err.error || "Regeneration failed after all attempts");
+              }
+              continue;
+            }
+
+            const { caption } = await res.json();
+            const validation = validateCaption(caption || "");
+
+            if (validation.valid && validation.cleaned) {
+              setResults((prev) =>
+                prev.map((r) =>
+                  r.style === style
+                    ? { ...r, caption: validation.cleaned, retrying: false }
+                    : r
+                )
+              );
+              toast.success(`${CAPTION_STYLE_LABELS[style]} caption regenerated!`);
+              succeeded = true;
+              break;
+            }
+
+            // Validator rejected — retry if attempts remain
+            if (attempt === REGEN_MAX_RETRIES - 1) {
+              throw new Error(
+                validation.reason || "Caption didn't pass quality check after all attempts"
+              );
+            }
+          } catch (err: unknown) {
+            if (attempt === REGEN_MAX_RETRIES - 1) {
+              const message =
+                err instanceof Error ? err.message : "Failed to regenerate caption";
+              setResults((prev) =>
+                prev.map((r) =>
+                  r.style === style
+                    ? { ...r, retrying: false, error: message }
+                    : r
+                )
+              );
+              toast.error(message);
+            }
+            // otherwise keep retrying
+          }
         }
-
-        const { caption } = await res.json();
-        const cleaned = clientCleanCaption(caption || "");
-
-        setResults((prev) =>
-          prev.map((r) =>
-            r.style === style
-              ? { ...r, caption: cleaned, loading: false }
-              : r
-          )
-        );
-
-        toast.success(`${CAPTION_STYLE_LABELS[style]} caption regenerated!`);
-      } catch (err: unknown) {
-        const message =
-          err instanceof Error ? err.message : "Failed to regenerate caption";
-        setResults((prev) =>
-          prev.map((r) =>
-            r.style === style
-              ? { ...r, loading: false, error: message }
-              : r
-          )
-        );
-        toast.error(message);
       } finally {
+        // Clean up retrying state even if something unexpected happens
+        if (!succeeded) {
+          setResults((prev) =>
+            prev.map((r) =>
+              r.style === style ? { ...r, retrying: false } : r
+            )
+          );
+        }
         setRegeneratingStyles((prev) => {
           const next = new Set(prev);
           next.delete(style);
@@ -531,6 +581,7 @@ export default function App() {
   // --- Render ---
   return (
     <div className="min-h-screen bg-background">
+      <AnimatedBackground />
       <Toaster
         position="top-center"
         richColors
@@ -555,7 +606,7 @@ export default function App() {
               <h1 className="font-heading font-bold text-lg text-foreground leading-tight">
                 TeamDiscovery
               </h1>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-foreground/40">
                 Four styles. Endless creativity.
               </p>
             </div>
@@ -594,7 +645,7 @@ export default function App() {
               onClick={handleReset}
               className="
                 inline-flex items-center gap-2 px-4 py-2 rounded-xl
-                text-sm text-muted-foreground
+                text-sm text-foreground/40
                 hover:text-foreground hover:bg-muted
                 transition-all duration-150 ease-out
                 active:scale-[0.97]
@@ -609,110 +660,182 @@ export default function App() {
       </header>
 
       {/* Main content */}
-      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8 space-y-8">
-        {/* Upload phase */}
-        {phase === "upload" && (
-          <div className="space-y-6">
-            {!videoFile ? (
-              <UploadZone onFileSelected={handleFileSelected} />
-            ) : (
-              <>
-                {/* Video preview */}
-                <div className="relative rounded-2xl overflow-hidden bg-black/40 border border-border shadow-lg">
-                  <video
-                    src={videoPreviewUrl!}
-                    controls
-                    className="w-full max-h-[400px] object-contain"
-                    poster={undefined}
-                  />
-                  <div className="absolute top-3 right-3 bg-background/80 backdrop-blur-sm rounded-lg px-3 py-1.5 text-xs font-medium text-foreground border border-border">
-                    {videoDuration ? formatDuration(videoDuration) : "..."}
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
+        <AnimatePresence mode="wait">
+          {/* Upload phase */}
+          {phase === "upload" && (
+            <motion.div
+              key="upload"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.3, ease: "easeOut" }}
+              className="space-y-6"
+            >
+              {!videoFile ? (
+                <UploadZone onFileSelected={handleFileSelected} />
+              ) : (
+                <>
+                  {/* Video preview */}
+                  <NeonFrame>
+                    <div className="relative rounded-2xl overflow-hidden bg-black/40">
+                      <video
+                        src={videoPreviewUrl!}
+                        controls
+                        className="w-full max-h-[400px] object-contain"
+                        poster={undefined}
+                      />
+                      <div className="absolute top-3 right-3 bg-background/80 backdrop-blur-sm rounded-lg px-3 py-1.5 text-xs font-medium text-foreground border border-border">
+                        {videoDuration ? formatDuration(videoDuration) : "..."}
+                      </div>
+                    </div>
+                  </NeonFrame>
+
+                  {/* Upload another */}
+                  <div className="flex justify-center">
+                    <UploadZone
+                      onFileSelected={handleFileSelected}
+                      disabled={isGenerating}
+                    />
                   </div>
+                </>
+              )}
+
+              {/* Pipeline error */}
+              {pipelineError && (
+                <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-xl text-sm text-destructive text-center">
+                  {pipelineError}
                 </div>
+              )}
+            </motion.div>
+          )}
 
-                {/* Upload another */}
-                <div className="flex justify-center">
-                  <UploadZone
-                    onFileSelected={handleFileSelected}
-                    disabled={isGenerating}
-                  />
-                </div>
-              </>
-            )}
-
-            {/* Pipeline error */}
-            {pipelineError && (
-              <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-xl text-sm text-destructive text-center">
-                {pipelineError}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Processing phase */}
-        {phase === "processing" && (
-          <div className="max-w-2xl mx-auto space-y-8">
-            {/* Video thumbnail during processing */}
-            {videoPreviewUrl && (
-              <div className="relative rounded-2xl overflow-hidden bg-black/40 border border-border">
-                <video
-                  src={videoPreviewUrl}
-                  className="w-full max-h-[240px] object-cover opacity-60"
-                  muted
-                  autoPlay
-                  loop
-                  playsInline
-                />
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="flex flex-col items-center gap-2">
-                    <RefreshCw className="w-8 h-8 text-primary animate-spin" />
-                    <span className="text-sm text-foreground font-medium">
-                      Processing your video...
-                    </span>
+          {/* Processing phase */}
+          {phase === "processing" && (
+            <motion.div
+              key="processing"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.3, ease: "easeOut" }}
+              className="max-w-2xl mx-auto space-y-8"
+            >
+              {/* Video thumbnail during processing */}
+              {videoPreviewUrl && (
+                <NeonFrame>
+                  <div className="relative rounded-2xl overflow-hidden bg-black/40">
+                    <video
+                      src={videoPreviewUrl}
+                      className="w-full max-h-[240px] object-cover opacity-60"
+                      muted
+                      autoPlay
+                      loop
+                      playsInline
+                    />
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="flex flex-col items-center gap-2">
+                        <RefreshCw className="w-8 h-8 text-primary animate-spin" />
+                        <span className="text-sm text-foreground font-medium">
+                          Processing your video...
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
-            )}
+                </NeonFrame>
+              )}
 
-            <ProgressIndicator
-              currentStep={pipelineStep}
-              error={pipelineError}
-              stepElapsed={stepElapsed}
-              stepTimes={stepTimes}
-              activeModel={activeModel}
-              stepEstimates={STEP_ESTIMATES}
-            />
-          </div>
-        )}
+              <ProgressIndicator
+                currentStep={pipelineStep}
+                error={pipelineError}
+                stepElapsed={stepElapsed}
+                stepTimes={stepTimes}
+                activeModel={activeModel}
+                stepEstimates={STEP_ESTIMATES}
+              />
+            </motion.div>
+          )}
 
-        {/* Results phase */}
-        {phase === "results" && (
-          <div className="space-y-6">
-            {/* Video player */}
-            {videoPreviewUrl && (
-              <div className="rounded-2xl overflow-hidden bg-black/40 border border-border shadow-lg">
-                <video
-                  src={videoPreviewUrl}
-                  controls
-                  className="w-full max-h-[360px] object-contain"
-                />
-              </div>
-            )}
+          {/* Results phase */}
+          {phase === "results" && (
+            <motion.div
+              key="results"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.3, ease: "easeOut" }}
+              className="space-y-6"
+            >
+              {/* Video player */}
+              {videoPreviewUrl && (
+                <NeonFrame>
+                  <div className="rounded-2xl overflow-hidden bg-black/40">
+                    <video
+                      src={videoPreviewUrl}
+                      controls
+                      className="w-full max-h-[360px] object-contain"
+                    />
+                  </div>
+                </NeonFrame>
+              )}
 
-            {/* Caption cards */}
-            <ResultsPanel
-              results={results}
-              onRegenerate={handleRegenerate}
-              regeneratingStyles={regeneratingStyles}
-              onEditCaption={handleEditCaption}
-            />
-          </div>
-        )}
+              {/* Caption cards */}
+              <ResultsPanel
+                results={results}
+                onRegenerate={handleRegenerate}
+                regeneratingStyles={regeneratingStyles}
+                onEditCaption={handleEditCaption}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </main>
+
+      {/* Team Section */}
+      <section className="border-t border-border mt-16">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10">
+          <h2 className="text-center text-sm font-heading font-semibold text-foreground/60 uppercase tracking-widest mb-8">
+            Team
+          </h2>
+          <div className="flex flex-wrap items-center justify-center gap-4">
+            {/* Team Leader */}
+            <div className="team-pill flex items-center gap-2.5">
+              <span className="text-sm text-secondary font-medium">Kartik Dave</span>
+              <span className="team-badge-leader text-[10px] px-1.5 py-0.5 rounded-full bg-secondary/10 text-secondary border border-secondary/20 font-medium">
+                Team Leader
+              </span>
+            </div>
+            {/* Members */}
+            <div className="team-pill flex items-center gap-2">
+              <span className="text-sm text-secondary font-medium">Pruthvirajsinh Rathod</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-foreground/40 border border-border/30 font-medium">
+                Member
+              </span>
+            </div>
+            <div className="team-pill flex items-center gap-2">
+              <span className="text-sm text-secondary font-medium">Priyanshu Koshti</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-foreground/40 border border-border/30 font-medium">
+                Member
+              </span>
+            </div>
+            <div className="team-pill flex items-center gap-2">
+              <span className="text-sm text-secondary font-medium">Aakash Gupta</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-foreground/40 border border-border/30 font-medium">
+                Member
+              </span>
+            </div>
+            <div className="team-pill flex items-center gap-2">
+              <span className="text-sm text-secondary font-medium">Harshrajsinh Gohil</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-foreground/40 border border-border/30 font-medium">
+                Member
+              </span>
+            </div>
+          </div>
+        </div>
+      </section>
 
       {/* Footer */}
       <footer className="border-t border-border mt-16">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 text-center text-xs text-muted-foreground">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 text-center text-xs text-foreground/40">
           TeamDiscovery &middot; Multi-Style Video Captioning &middot; Built
           with ❤️
         </div>
