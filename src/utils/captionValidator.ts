@@ -67,6 +67,95 @@ function hasTerminalPunctuation(text: string): boolean {
   return /[.!?]$/.test(text.trim());
 }
 
+/**
+ * Known contraction stems — words that never end in English without
+ * an apostrophe-continuation ('t, 's, 've, 're, 'll, 'd).
+ * e.g. "didn" → "didn't", "you" (in context) → "you're"/"you've"
+ */
+const CONTRACTION_STEMS = new Set([
+  "didn", "doesn", "isn", "wasn", "weren", "wouldn", "couldn", "shouldn",
+  "don", "can", "won", "hasn", "haven", "hadn", "mustn", "mightn",
+  "aren", "needn", "daren", "oughtn",
+]);
+
+/**
+ * Check whether the word immediately before the final punctuation mark
+ * looks like a truncated contraction or fractured word fragment.
+ */
+function hasTruncatedFinalWord(text: string): boolean {
+  // Extract the word right before terminal punctuation (., !, or ?).
+  // [\w']+ includes apostrophes so contractions like "wasn't" stay whole —
+  // plain \w+ breaks at the apostrophe, giving a false 1-char fragment.
+  const match = text.match(/.*\b([\w']+)[.!?]\s*$/);
+  if (!match) return false;
+
+  const lastWord = match[1].toLowerCase();
+
+  // Known contraction stems
+  if (CONTRACTION_STEMS.has(lastWord)) return true;
+
+  // Single character that isn't "I" or "a" — almost certainly a fragment
+  if (lastWord.length === 1 && !["i", "a"].includes(lastWord)) return true;
+
+  // Two-character last words: in English, very few 2-letter words appear
+  // naturally at the end of a sentence. The only plausible ones are: be, do,
+  // go, hi, ho, lo, ma, no, oh, pa, so, to, we. Anything else is a fragment.
+  const VALID_TWO_LETTER_ENDS = new Set([
+    "be", "do", "go", "hi", "ho", "lo", "ma", "no", "oh", "pa", "so", "to", "we",
+  ]);
+  if (lastWord.length === 2 && !VALID_TWO_LETTER_ENDS.has(lastWord)) return true;
+
+  // Three-letter words: a curated set of ~280 common 3-letter words that
+  // can naturally appear at the end of an English sentence. Anything outside
+  // this set is almost certainly a mid-word fragment (e.g. "kno." for "know",
+  // "sho." for "show", "und." for "understand", "thr." for "through").
+  const VALID_THREE_LETTER_ENDS = new Set([
+    "ace", "act", "add", "age", "ago", "aid", "aim", "air", "ale", "all",
+    "and", "ant", "ape", "arc", "are", "ark", "arm", "art", "ash", "ask",
+    "awe", "axe", "bad", "bag", "ban", "bar", "bat", "bay", "bed", "bet",
+    "bid", "big", "bit", "bow", "box", "boy", "bud", "bug", "bus", "but",
+    "buy", "cab", "can", "cap", "car", "cat", "cop", "cow", "cry", "cub",
+    "cup", "cut", "dad", "dam", "day", "den", "dew", "did", "die", "dig",
+    "dim", "dip", "dog", "dot", "dry", "dub", "due", "dug", "duo", "dye",
+    "ear", "eat", "eel", "egg", "ego", "elm", "emu", "end", "era", "eve",
+    "ewe", "eye", "fan", "far", "fat", "fax", "fed", "fee", "few", "fig",
+    "fin", "fir", "fit", "fix", "fly", "foe", "fog", "for", "fox", "fry",
+    "fun", "fur", "gag", "gap", "gas", "gel", "gem", "get", "gin", "god",
+    "got", "gum", "gun", "gut", "guy", "gym", "had", "ham", "has", "hat",
+    "hay", "hen", "her", "hew", "hid", "him", "hip", "his", "hit", "hog",
+    "hop", "hot", "how", "hub", "hue", "hug", "hut", "ice", "icy", "ill",
+    "imp", "ink", "inn", "ion", "ire", "irk", "its", "ivy", "jab", "jag",
+    "jam", "jar", "jaw", "jay", "jet", "jig", "job", "jog", "jot", "joy",
+    "jug", "jut", "keg", "ken", "key", "kid", "kin", "kit", "lab", "lad",
+    "lag", "lap", "law", "lay", "lea", "led", "leg", "let", "lid", "lie",
+    "lip", "lit", "log", "lot", "low", "mad", "man", "map", "mat", "maw",
+    "max", "may", "men", "met", "mew", "mix", "mob", "mod", "mop", "mow",
+    "mud", "mug", "mum", "nab", "nag", "nap", "net", "new", "nil", "nip",
+    "nit", "nod", "nor", "not", "now", "nun", "nut", "oak", "oar", "oat",
+    "odd", "ode", "off", "oil", "old", "one", "orb", "orc", "ore", "our",
+    "out", "owe", "owl", "own", "pad", "pal", "pan", "pap", "par", "pat",
+    "paw", "pay", "pea", "peg", "pen", "pep", "per", "pet", "pew", "pie",
+    "pig", "pin", "pit", "ply", "pod", "pop", "pot", "pow", "pry", "pub",
+    "pug", "pun", "pup", "put", "rad", "rag", "ram", "ran", "rap", "rat",
+    "raw", "ray", "red", "ref", "rep", "rib", "rid", "rig", "rim", "rip",
+    "rob", "rod", "roe", "rot", "row", "rub", "rug", "rum", "run", "rut",
+    "rye", "sad", "sag", "sap", "sat", "saw", "say", "sea", "set", "sew",
+    "she", "shy", "sin", "sip", "sir", "sit", "six", "ski", "sky", "sly",
+    "sob", "sod", "son", "sop", "sot", "sow", "soy", "spa", "spy", "sty",
+    "sub", "sue", "sum", "sun", "sup", "tab", "tad", "tag", "tan", "tap",
+    "tar", "tat", "tax", "tea", "ten", "the", "tie", "tin", "tip", "toe",
+    "ton", "too", "top", "tot", "tow", "toy", "try", "tub", "tug", "two",
+    "urn", "use", "van", "vat", "vet", "vex", "via", "vie", "vim", "vow",
+    "wad", "wag", "war", "was", "wax", "way", "web", "wet", "who", "why",
+    "wig", "win", "wit", "woe", "wok", "won", "woo", "wow", "yak", "yam",
+    "yap", "yaw", "yea", "yes", "yet", "yew", "yip", "you", "zap", "zen",
+    "zig", "zip", "zit", "zoo",
+  ]);
+  if (lastWord.length === 3 && !VALID_THREE_LETTER_ENDS.has(lastWord)) return true;
+
+  return false;
+}
+
 function capitalizeFirst(text: string): string {
   if (!text) return text;
   return text.charAt(0).toUpperCase() + text.slice(1);
@@ -167,8 +256,10 @@ function finalCleaning(text: string): string {
   // Capitalize first letter
   c = capitalizeFirst(c);
 
-  // Ensure terminal punctuation if missing (and text seems complete-ish)
-  if (c.length >= 15 && !hasTerminalPunctuation(c)) {
+  // Ensure terminal punctuation if missing (and text seems complete-ish).
+  // Don't add a period if the last word is a truncated contraction stem —
+  // otherwise we manufacture a false "complete" signal for fragments.
+  if (c.length >= 15 && !hasTerminalPunctuation(c) && !hasTruncatedFinalWord(c + ".")) {
     c += ".";
   }
 
@@ -297,6 +388,13 @@ export function validateCaption(raw: string): ValidationResult {
   if (!hasTerminalPunctuation(cleaned) && cleaned.length < 60) {
     // Short, no punctuation — likely truncated mid-thought
     return { valid: false, reason: "incomplete sentence (no terminal punctuation)", cleaned };
+  }
+
+  // Truncated final word — the word right before the period is a contraction
+  // stem (e.g. "didn." → "didn't") or a single-character fragment. This catches
+  // output that finalCleaning gave a period to but is still clearly incomplete.
+  if (hasTruncatedFinalWord(cleaned)) {
+    return { valid: false, reason: "truncated final word (fragment)", cleaned };
   }
 
   // Song lyrics / transcript repetition

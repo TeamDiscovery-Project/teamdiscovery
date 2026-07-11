@@ -78,7 +78,7 @@ Writing captions is time-consuming. Writing captions in **multiple tones** for d
 6. **Extract Frames** — 1 frame per 3 seconds via Canvas API
 7. **Describe Frames** — Fireworks Vision models generate scene descriptions
 8. **Generate Captions** — DeepSeek-V4-Pro creates 4 styled captions from combined context
-9. **Validate & Retry** — Each caption passes through 7 validation rules; failed captions retry 3× with progressive backoff (0 → 500ms → 1000ms)
+9. **Validate & Retry** — Each caption passes through 14 validation rules including truncated-word detection; failed captions retry 3× with progressive backoff (0 → 500ms → 1000ms)
 
 ---
 
@@ -217,22 +217,36 @@ TeamDiscovery features a custom **cyberpunk neon** design language:
 
 ## 🧪 Caption Quality System
 
-The `captionValidator.ts` module performs rigorous AI output filtering:
+The `captionValidator.ts` module performs rigorous AI output filtering across 14 validation rules:
 
 ### Two-Phase Cleaning
 1. **Structural Extraction** — Extracts quoted text, filters reasoning-line markers, strips known reasoning prefixes
-2. **Final Cleaning** — Strips emojis, style prefixes (`"Caption:"`, `"Formal caption:"`), normalizes whitespace & punctuation
+2. **Final Cleaning** — Strips emojis, style prefixes (`"Caption:"`, `"Formal caption:"`), normalizes whitespace & punctuation; adds terminal punctuation only when the final word is a complete English word (not a truncated contraction stem)
 
-### Seven Validation Rules
+### Validation Rules
 | # | Rule | Catches |
 |---|---|---|
 | 1 | Empty/whitespace | Null responses |
-| 2 | Min length (< 20 chars) | Truncated output |
-| 3 | Max length (> 500 chars) | Reasoning dumps |
-| 4 | Reasoning prefixes | "Here's a caption...", "I think..." |
-| 5 | Inline reasoning | "This caption is...", "A good caption would be..." |
-| 6 | Self-reference | "I believe", "Let me think..." |
-| 7 | Instruction echo | "A formal caption that describes..." |
+| 2 | Raw tag fragments | Leaked HTML/XML tags (`<think>`, `</output>`) |
+| 3 | Min length (< 15 chars) | Truncated output, placeholder echoes |
+| 4 | Max length (> 500 chars) | Reasoning dumps |
+| 5 | Reasoning prefixes | "Here's a caption...", "I think..." |
+| 6 | Inline reasoning | "This caption is...", "A good caption would be..." |
+| 7 | Self-reference | "I believe", "Let me think..." |
+| 8 | Instruction echo | "A formal caption that describes..." |
+| 9 | Whole-text reasoning | Mid-paragraph chain-of-thought leaks, "Your caption here" echoes |
+| 10 | Video context leak | Raw transcript/frame headers, lyrics markers, timestamps |
+| 11 | Explanatory fragments | "Possibly a pun...", model explaining instead of captioning |
+| 12 | Incomplete sentence | Short text with no terminal punctuation (< 60 chars) |
+| 13 | **Truncated final word** | Contraction stems (`"didn."`, `"couldn."`, `"wouldn."`), 1-3 char non-word fragments before period (`"kno."`, `"thr."`) |
+| 14 | Song lyrics detection | Bigram repetition (≥3 occurrences) indicating transcript leak |
+
+### Truncated Final Word Detection (Rule 13)
+This is the most nuanced check. The function `hasTruncatedFinalWord()` extracts the word immediately before the final punctuation mark and validates it:
+- **Contraction stems**: A set of 18 known stems (`didn`, `couldn`, `wouldn`, `don`, `can`, etc.) — if the word matches, it's a fragment
+- **Single characters**: Anything other than `"I"` or `"a"` is rejected
+- **Two-letter words**: Only 13 plausible English sentence-enders (`be`, `do`, `go`, `hi`, `no`, `so`, `to`, `we`, etc.) — anything else is a fragment
+- **Three-letter words**: A curated allowlist of ~280 common English words — anything outside it (e.g. `"kno"`, `"thr"`, `"und"`, `"sho"`) is rejected
 
 Failed captions trigger up to 3 retries with progressive backoff (0ms → 500ms → 1000ms).
 
@@ -251,8 +265,8 @@ Every processing step is instrumented with precise timing. After generation comp
 │ transcribe         │ 1.89s    │ true    │ 0       │
 │ frames             │ 0.45s    │ true    │ 0       │
 │ describe           │ 22.50s   │ true    │ 0       │
-│ captions           │ 8.76s    │ true    │ 0       │
-│ TOTAL              │ 40.06s   │ —       │ —       │
+│ captions           │ 28.34s   │ true    │ 0       │
+│ TOTAL              │ 59.64s   │ —       │ —       │
 └────────────────────┴──────────┴─────────┴─────────┘
 ```
 

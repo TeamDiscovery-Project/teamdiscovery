@@ -7,14 +7,14 @@
  *   - frames:     each frame ~0.15s; frame count = max(1, floor((duration - 0.5) / 3))
  *   - transcribe: audio processing ~0.15× real-time via Groq
  *   - describe:   Vision API ~2.5s per frame (API latency + inference)
- *   - captions:   LLM ~2s per style (4 styles) + network overhead
+ *   - captions:   LLM ~7s per style (4 styles) + network/retry overhead
  */
 
 const UPLOAD_SPEED_MBPS = 5;     // Supabase CDN is fast — ~5 MB/s observed
 const TARGET_SIZE_MB = 38;
 const TOTAL_STYLES = 4;
 const DESCRIBE_PER_FRAME = 2.5;  // seconds per vision-model frame description (~2-3s API latency + inference)
-const CAPTION_PER_STYLE = 2;     // seconds per LLM caption generation
+const CAPTION_PER_STYLE = 7;     // seconds per LLM caption generation (API + inference + retries)
 const FRAME_EXTRACT_PER = 0.15;  // seconds per canvas frame extraction
 
 export interface PipelineEstimates {
@@ -67,7 +67,7 @@ export function calculateEstimates(
   const describe = Math.max(8, Math.round(frameCount * DESCRIBE_PER_FRAME));
 
   // ── Step 6: Generate captions ─────────────────────────────────
-  // 4 styles × ~3s each (LLM inference + network). Fairly constant.
+  // 4 styles × ~7s each (LLM inference + retries + network). Fairly constant.
   const captions = Math.round(TOTAL_STYLES * CAPTION_PER_STYLE);
 
   const steps: Record<string, number> = {
