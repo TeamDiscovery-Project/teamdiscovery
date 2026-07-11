@@ -44,26 +44,26 @@ Writing captions is time-consuming. Writing captions in **multiple tones** for d
 ┌────────────────────────────────────────────────────────────────────┐
 │                        BROWSER (React App)                         │
 │                                                                    │
-│  Upload → Compress → Extract Frames → Extract Audio                │
+│  Upload → Compress → Extract Frames → Extract Audio               │
 │     │          │              │               │                    │
 │     ▼          ▼              ▼               ▼                    │
 │  [Supabase Storage]  [Canvas API]      [MediaRecorder]             │
 │     │                    │               │                         │
 │     ▼                    ▼               ▼                         │
 │  ┌──────────────────────────────────────────────┐                  │
-│  │           SUPABASE EDGE FUNCTIONS            │                  │
-│  │                                              │                  │
-│  │  /transcribe ──── Groq Whisper               │                  │
-│  │  /describe-frames ─ Fireworks Vision Models  │                  │
-│  │  /generate-caption ─ DeepSeek-V4-Pro         │                  │
-│  │  /generate-all-captions ─ Batch Generation   │                  │
+│  │           SUPABASE EDGE FUNCTIONS             │                  │
+│  │                                               │                  │
+│  │  /transcribe ──── Groq Whisper                │                  │
+│  │  /describe-frames ─ Fireworks Vision Models   │                  │
+│  │  /generate-caption ─ DeepSeek-V4-Pro          │                  │
+│  │  /generate-all-captions ─ Batch Generation    │                  │
 │  └──────────────────────────────────────────────┘                  │
 │     │                                                              │
 │     ▼                                                              │
 │  ┌─────────────────────┐     ┌──────────────────────┐              │
-│  │    Supabase DB      │     │  Caption Validator   │              │
-│  │  jobs + captions    │     │  Reasoning filter +  │              │
-│  │  tables             │     │  3-attempt retry loop│              │
+│  │    Supabase DB       │     │  Caption Validator    │              │
+│  │  jobs + captions    │     │  Reasoning filter +   │              │
+│  │  tables             │     │  3-attempt retry loop │              │
 │  └─────────────────────┘     └──────────────────────┘              │
 └────────────────────────────────────────────────────────────────────┘
 ```
@@ -129,12 +129,20 @@ Writing captions is time-consuming. Writing captions in **multiple tones** for d
 
 ### Environment Variables
 
-Copy `.env.example` to `.env` and configure:
+> ⚠️ **Required** — The app will not render without these. A missing `.env` file causes a black screen because the Supabase client throws a fatal error during module initialization.
+
+Copy `.env.example` to `.env` with your actual Supabase credentials:
+
+```bash
+cp .env.example .env
+```
+
+Then edit `.env` with real values:
 
 | Variable | Description |
 |---|---|
-| `VITE_SUPABASE_URL` | Your Supabase project URL |
-| `VITE_SUPABASE_ANON_KEY` | Supabase publishable (anon) key |
+| `VITE_SUPABASE_URL` | Your Supabase project URL (e.g. `https://xxxxx.supabase.co`) |
+| `VITE_SUPABASE_ANON_KEY` | Supabase publishable (anon) key from your project dashboard → Settings → API |
 
 ### Local Development
 
@@ -181,6 +189,8 @@ TeamDiscovery/
 │       ├── styleConfig.ts         # Per-style colors, emojis, gradients
 │       ├── timeEstimator.ts       # Per-step time estimates for pipeline progress
 │       └── videoCompressor.ts     # MediaRecorder-based re-encoding
+├── public/
+│   └── nativelyai.svg            # App favicon
 ├── Dockerfile                    # Multi-stage: Node build → nginx serve
 ├── docker-compose.yml            # Single-service orchestration
 ├── nginx.conf                    # Gzip, caching, SPA fallback
@@ -228,15 +238,60 @@ Failed captions trigger up to 3 retries with progressive backoff (0ms → 500ms 
 
 ---
 
+### Pipeline Timing
+
+Every processing step is instrumented with precise timing. After generation completes, open the browser console to see a detailed `console.table` breakdown:
+
+```
+┌────────────────────┬──────────┬─────────┬─────────┐
+│ Step               │ Duration │ Success │ Retries │
+├────────────────────┼──────────┼─────────┼─────────┤
+│ compress           │ 2.34s    │ true    │ 0       │
+│ upload             │ 4.12s    │ true    │ 0       │
+│ transcribe         │ 1.89s    │ true    │ 0       │
+│ frames             │ 0.45s    │ true    │ 0       │
+│ describe           │ 22.50s   │ true    │ 0       │
+│ captions           │ 8.76s    │ true    │ 0       │
+│ TOTAL              │ 40.06s   │ —       │ —       │
+└────────────────────┴──────────┴─────────┴─────────┘
+```
+
+This is also surfaced in the UI under ResultsPanel → Timing tab (if available).
+
+---
+
+## 🩺 Troubleshooting
+
+| Symptom | Likely Cause | Fix |
+|---|---|---|
+| **Black screen on load** | Missing `.env` file (Supabase client crashes) | Create `.env` from `.env.example` with real credentials |
+| **Upload fails with "Storage not found"** | Supabase storage bucket not created | Run `CREATE BUCKET` migration in Supabase dashboard |
+| **Edge functions return 404** | Functions not deployed | Deploy all 4 functions via Supabase CLI or dashboard |
+| **"Failed to fetch" errors** | CORS or network issue | Check Supabase project is active and URL is correct |
+| **Caption generation hangs** | AI model timeout or rate limit | Check Supabase Edge Function logs for errors |
+| **Video compression very slow** | Large input video | Videos > 100MB may take longer; trim before uploading |
+
+---
+
+## ⚠️ Known Limitations
+
+- **Video length**: Optimized for 30–120 second clips. Longer videos may exceed memory limits during in-browser processing.
+- **File size**: Videos are compressed to ≤38MB for Supabase upload. Very high-bitrate videos may lose noticeable quality.
+- **Browser support**: Requires a modern Chromium-based browser (Chrome, Edge, Brave, Arc) for MediaRecorder and Canvas API support.
+- **Cold starts**: Supabase Edge Functions may experience 1–3 second cold starts on first invocation after inactivity.
+- **Rate limits**: DeepSeek-V4-Pro and Groq APIs may throttle under heavy concurrent usage.
+
+---
+
 ## 👥 Team
 
 | Name | Role |
 |---|---|
 | **Kartik Dave** | **Team Leader** |
-| Pruthvirajsinh Rathod | Member |
-| Priyanshu Koshti | Member |
-| Aakash Gupta | Member |
-| Harshrajsinh Gohil | Member |
+| Pruthvirajsinh Rathod | Developer |
+| Priyanshu Koshti | Developer |
+| Aakash Gupta | Developer |
+| Harshrajsinh Gohil | Developer |
 
 ---
 
