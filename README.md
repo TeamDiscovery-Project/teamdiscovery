@@ -167,6 +167,8 @@ The app is served at `http://localhost:3000` via nginx.
 
 ```
 TeamDiscovery/
+├── public/
+│   └── TeamDiscovery.jpg            # App Logo
 ├── src/
 │   ├── App.tsx                   # Main app: upload, pipeline orchestration, state
 │   ├── main.tsx                  # React root mount
@@ -189,8 +191,6 @@ TeamDiscovery/
 │       ├── styleConfig.ts         # Per-style colors, emojis, gradients
 │       ├── timeEstimator.ts       # Per-step time estimates for pipeline progress
 │       └── videoCompressor.ts     # MediaRecorder-based re-encoding
-├── public/
-│   └── nativelyai.svg            # App favicon
 ├── Dockerfile                    # Multi-stage: Node build → nginx serve
 ├── docker-compose.yml            # Single-service orchestration
 ├── nginx.conf                    # Gzip, caching, SPA fallback
